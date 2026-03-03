@@ -9,8 +9,14 @@ import { Card } from '@/components/ui'
 import { colors, spacing, radius, fontSize, fontWeight } from '@/theme'
 import type { ServiceHealth } from '@/types'
 
+interface BfaLatencyData {
+  avgMs: number
+  p95Ms: number
+}
+
 interface HealthCardProps {
   service: ServiceHealth
+  bfaLatency?: BfaLatencyData
 }
 
 const STATUS_CONFIG = {
@@ -19,7 +25,7 @@ const STATUS_CONFIG = {
   unhealthy: { color: colors.error, bg: colors.errorLight, icon: 'close-circle' as const, label: 'Indisponível' },
 } as const
 
-export function HealthCard({ service }: HealthCardProps) {
+export function HealthCard({ service, bfaLatency }: HealthCardProps) {
   const config = STATUS_CONFIG[service.status]
 
   return (
@@ -45,6 +51,23 @@ export function HealthCard({ service }: HealthCardProps) {
           <Text style={styles.metricValue}>{(service.uptimePercent * 100).toFixed(1)}<Text style={styles.metricUnit}>%</Text></Text>
         </View>
       </View>
+
+      {bfaLatency && (
+        <View style={styles.bfaSection}>
+          <View style={styles.bfaDivider} />
+          <View style={styles.metricsRow}>
+            <View style={styles.metric}>
+              <Text style={styles.metricLabel}>BFA Latência Média</Text>
+              <Text style={styles.metricValue}>{bfaLatency.avgMs.toFixed(0)}<Text style={styles.metricUnit}>ms</Text></Text>
+            </View>
+            <View style={styles.separator} />
+            <View style={styles.metric}>
+              <Text style={styles.metricLabel}>BFA P95</Text>
+              <Text style={styles.metricValue}>{bfaLatency.p95Ms.toFixed(0)}<Text style={styles.metricUnit}>ms</Text></Text>
+            </View>
+          </View>
+        </View>
+      )}
     </Card>
   )
 }
@@ -114,5 +137,13 @@ const styles = StyleSheet.create({
     width: 1,
     height: 32,
     backgroundColor: colors.borderLight,
+  },
+  bfaSection: {
+    marginTop: spacing.md,
+  },
+  bfaDivider: {
+    height: 1,
+    backgroundColor: colors.borderLight,
+    marginBottom: spacing.md,
   },
 })
