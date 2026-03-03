@@ -1,0 +1,46 @@
+{
+  "expo": {
+    "name": "PJ Assistant",
+    "slug": "pj-assistant-app",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "icon": "./assets/icon.png",
+    "scheme": "pjassistant",
+    "userInterfaceStyle": "light",
+    "newArchEnabled": true,
+    "splash": {
+      "backgroundColor": "#F37021"
+    },
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "com.itau.pjassistant"
+    },
+    "android": {
+      "adaptiveIcon": {
+        "foregroundImage": "./assets/adaptive-icon.png",
+        "backgroundColor": "#F37021"
+      },
+      "package": "com.itau.pjassistant"
+    },
+    "plugins": [
+      "expo-router"
+    ],
+    "experiments": {
+      "typedRoutes": true
+    },
+    "extra": {
+      "apiBaseUrl": "https://pj-assistant-bfa-go-production.up.railway.app",
+      "eas": {
+        "projectId": "8cd7f62b-cff8-4afd-b896-f4095447016a"
+      },
+      "router": {}
+    },
+    "owner": "boddenberg",
+    "runtimeVersion": {
+      "policy": "appVersion"
+    },
+    "updates": {
+      "url": "https://u.expo.dev/8cd7f62b-cff8-4afd-b896-f4095447016a"
+    }
+  }
+}

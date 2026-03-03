@@ -1,0 +1,1 @@
+Removido a pedido do usuário. Tela de Pix agendado não faz mais parte do app.
