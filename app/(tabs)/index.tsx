@@ -10,7 +10,7 @@ import * as Haptics from 'expo-haptics'
 import { colors, spacing, radius, fontSize, fontWeight, shadow } from '@/theme'
 import { formatCurrency, resetDeviceId } from '@/lib'
 import { useCustomerStore, useAuthStore, useChatStore } from '@/stores'
-import { useTransactionSummary, useFinancialSummary, transactionKeys, financialKeys } from '@/hooks'
+import { useTransactionSummary, useFinancialSummary, useAccount, transactionKeys, financialKeys, accountKeys } from '@/hooks'
 import { useQueryClient } from '@tanstack/react-query'
 
 interface QuickAction {
@@ -66,6 +66,7 @@ export default function HomeScreen() {
 
   // Fetch real balance data from backend
   const queryClient = useQueryClient()
+  const { data: accountData, isRefetching: isRefetchingAccount } = useAccount(customerId)
   const { data: financialData, isRefetching: isRefetchingFinancial } = useFinancialSummary(customerId)
   const { data: summary, isRefetching: isRefetchingSummary } = useTransactionSummary(customerId)
   const [refreshing, setRefreshing] = useState(false)
@@ -73,15 +74,15 @@ export default function HomeScreen() {
   const handleRefresh = useCallback(async () => {
     setRefreshing(true)
     await Promise.all([
+      queryClient.invalidateQueries({ queryKey: accountKeys.all }),
       queryClient.invalidateQueries({ queryKey: financialKeys.all }),
       queryClient.invalidateQueries({ queryKey: transactionKeys.all }),
     ])
     setRefreshing(false)
   }, [queryClient])
 
-  // Financial summary has the correct balance (includes add-balance deposits)
-  // Transaction summary only calculates from transaction history
-  const balance = financialData?.balance?.current ?? summary?.balance ?? 0
+  // Priority: accounts endpoint > financial summary > transaction summary
+  const balance = accountData?.balance ?? financialData?.balance?.current ?? summary?.balance ?? 0
   const totalCredits = financialData?.cashFlow?.totalIncome ?? summary?.totalCredits ?? 0
   const totalDebits = financialData?.cashFlow?.totalExpenses ?? summary?.totalDebits ?? 0
 
@@ -113,7 +114,7 @@ export default function HomeScreen() {
         showsVerticalScrollIndicator={false}
         refreshControl={
           <RefreshControl
-            refreshing={refreshing || isRefetchingFinancial || isRefetchingSummary}
+            refreshing={refreshing || isRefetchingAccount || isRefetchingFinancial || isRefetchingSummary}
             onRefresh={handleRefresh}
             tintColor={colors.textInverse}
             colors={[colors.itauOrange]}

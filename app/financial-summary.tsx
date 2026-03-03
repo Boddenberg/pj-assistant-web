@@ -8,7 +8,7 @@ import { useRouter } from 'expo-router'
 import { Ionicons } from '@expo/vector-icons'
 
 import { useCustomerStore } from '@/stores'
-import { useFinancialSummary, useTransactionSummary, useCreditCards, useTransactions } from '@/hooks'
+import { useFinancialSummary, useTransactionSummary, useCreditCards, useTransactions, useAccount } from '@/hooks'
 import { Card } from '@/components/ui'
 import { formatCurrency } from '@/lib'
 import { colors, spacing, radius, fontSize, fontWeight, shadow } from '@/theme'
@@ -34,6 +34,7 @@ export default function FinancialSummaryScreen() {
   const customerId = useCustomerStore((s) => s.customerId)
   const { data, isLoading, isRefetching, refetch, isError } = useFinancialSummary(customerId)
   const { data: summary } = useTransactionSummary(customerId)
+  const { data: accountData } = useAccount(customerId)
   const { data: cards } = useCreditCards(customerId)
   const { data: transactions } = useTransactions(customerId, 100)
 
@@ -72,9 +73,9 @@ export default function FinancialSummaryScreen() {
   const prevMonth = () => setCalendarMonth(new Date(calYear, calMonth - 1, 1))
   const nextMonth = () => setCalendarMonth(new Date(calYear, calMonth + 1, 1))
 
-  // Safe accessors — all values come from backend
-  const balance = data?.balance?.current ?? summary?.balance ?? 0
-  const available = data?.balance?.available ?? balance
+  // Safe accessors — priority: accounts endpoint > financial summary > transaction summary
+  const balance = accountData?.balance ?? data?.balance?.current ?? summary?.balance ?? 0
+  const available = accountData?.availableBalance ?? data?.balance?.available ?? balance
   const invested = data?.balance?.invested ?? 0
 
   const totalIncome = data?.cashFlow?.totalIncome ?? summary?.totalCredits ?? 0

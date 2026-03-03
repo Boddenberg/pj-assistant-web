@@ -8,7 +8,7 @@ import * as Haptics from 'expo-haptics'
 import { useQueryClient } from '@tanstack/react-query'
 import { colors, spacing, radius, fontSize, fontWeight, shadow } from '@/theme'
 import { useCustomerStore } from '@/stores'
-import { transactionKeys, useCreditCards, creditCardKeys, financialKeys } from '@/hooks'
+import { transactionKeys, useCreditCards, creditCardKeys, financialKeys, accountKeys } from '@/hooks'
 import { httpClient, formatCurrency, AppError } from '@/lib'
 
 interface DevAction {
@@ -96,6 +96,7 @@ export default function DevToolsScreen() {
       }
 
       // Refresh balance & transactions on Home after any dev action
+      queryClient.invalidateQueries({ queryKey: accountKeys.all })
       queryClient.invalidateQueries({ queryKey: transactionKeys.all })
       queryClient.invalidateQueries({ queryKey: creditCardKeys.all })
       queryClient.invalidateQueries({ queryKey: financialKeys.all })

@@ -5,3 +5,4 @@ export { useCreditCards, useCreditCardInvoice, useRequestCreditCard, useCancelCr
 export { useFinancialSummary, financialKeys } from './use-financial'
 export { useBillPaymentHistory, billPaymentKeys } from './use-bill-payments'
 export { useScheduledPix, pixKeys } from './use-pix'
+export { useAccount, accountKeys } from './use-account'

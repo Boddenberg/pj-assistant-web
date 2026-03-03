@@ -10,7 +10,7 @@ export const creditCardService = {
   /** List customer's credit cards */
   async list(customerId: string): Promise<CreditCard[]> {
     const { data } = await httpClient.get<{ cards: CreditCard[] } | CreditCard[]>(
-      `/v1/customers/${encodeURIComponent(customerId)}/cards`,
+      `/v1/customers/${encodeURIComponent(customerId)}/credit-cards`,
     )
     // Backend returns { cards: [...] } wrapper — unwrap it
     const raw = (data && !Array.isArray(data) && 'cards' in data) ? data.cards : (Array.isArray(data) ? data : [])
