@@ -34,6 +34,7 @@ export default function DevToolsScreen() {
   const { data: cards } = useCreditCards(customerId)
   const [loading, setLoading] = useState<string | null>(null)
   const [balanceAmount, setBalanceAmount] = useState(10000)
+  const [creditLimitAmount, setCreditLimitAmount] = useState(50000)
   const [lastResult, setLastResult] = useState<string | null>(null)
   const [generatedTxs, setGeneratedTxs] = useState<GeneratedTransaction[]>([])
   const [showTxModal, setShowTxModal] = useState(false)
@@ -107,6 +108,7 @@ export default function DevToolsScreen() {
   }, [customerId, queryClient])
 
   const BALANCE_PRESETS = [1000, 5000, 10000, 50000, 100000]
+  const CREDIT_LIMIT_PRESETS = [10000, 25000, 50000, 100000, 200000]
 
   return (
     <>
@@ -155,6 +157,45 @@ export default function DevToolsScreen() {
           <Ionicons name="add-circle-outline" size={20} color={colors.textInverse} />
           <Text style={styles.actionBtnText}>
             {loading === 'add-balance' ? 'Adicionando...' : `Adicionar ${formatCurrency(balanceAmount)}`}
+          </Text>
+        </TouchableOpacity>
+      </View>
+
+      {/* Set Credit Limit */}
+      <View style={styles.section}>
+        <View style={styles.sectionHeader}>
+          <View style={[styles.sectionIcon, { backgroundColor: '#EDE9FE' }]}>
+            <Ionicons name="trending-up-outline" size={20} color="#8B5CF6" />
+          </View>
+          <View>
+            <Text style={styles.sectionTitle}>Limite de Crédito</Text>
+            <Text style={styles.sectionSubtitle}>Pré-aprovado para contratação de cartão</Text>
+          </View>
+        </View>
+
+        <View style={styles.presetRow}>
+          {CREDIT_LIMIT_PRESETS.map((v) => (
+            <TouchableOpacity
+              key={v}
+              style={[styles.presetChip, creditLimitAmount === v && styles.presetChipActive]}
+              onPress={() => setCreditLimitAmount(v)}
+            >
+              <Text style={[styles.presetText, creditLimitAmount === v && styles.presetTextActive]}>
+                {formatCurrency(v)}
+              </Text>
+            </TouchableOpacity>
+          ))}
+        </View>
+
+        <TouchableOpacity
+          style={[styles.actionBtn, { backgroundColor: '#8B5CF6' }]}
+          onPress={() => runAction('set-credit-limit', { creditLimit: creditLimitAmount })}
+          disabled={loading === 'set-credit-limit'}
+          activeOpacity={0.7}
+        >
+          <Ionicons name="shield-checkmark-outline" size={20} color={colors.textInverse} />
+          <Text style={styles.actionBtnText}>
+            {loading === 'set-credit-limit' ? 'Definindo...' : `Definir ${formatCurrency(creditLimitAmount)}`}
           </Text>
         </TouchableOpacity>
       </View>
