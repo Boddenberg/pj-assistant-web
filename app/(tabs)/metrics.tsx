@@ -99,6 +99,30 @@ export default function MetricsScreen() {
 
       {m && (
         <>
+          {/* ── BFA API ── */}
+          <SectionHeader title="BFA API" />
+          <Card style={styles.bfaCard}>
+            <View style={styles.bfaRow}>
+              <View style={styles.bfaStat}>
+                <Ionicons name="cloud-outline" size={20} color={colors.itauOrange} />
+                <Text style={styles.bfaValue}>
+                  {m.agent_performance.avg_bfa_latency_ms.toFixed(0)}
+                  <Text style={styles.bfaUnit}> ms</Text>
+                </Text>
+                <Text style={styles.bfaLabel}>Latência Média</Text>
+              </View>
+              <View style={styles.bfaDivider} />
+              <View style={styles.bfaStat}>
+                <Ionicons name="speedometer-outline" size={20} color={colors.itauOrange} />
+                <Text style={styles.bfaValue}>
+                  {m.agent_performance.p95_bfa_latency_ms.toFixed(0)}
+                  <Text style={styles.bfaUnit}> ms</Text>
+                </Text>
+                <Text style={styles.bfaLabel}>P95 Latência</Text>
+              </View>
+            </View>
+          </Card>
+
           {/* ── Desempenho do Agente ── */}
           <SectionHeader title="Desempenho do Agente" />
           <View style={styles.tileGrid}>
@@ -112,20 +136,6 @@ export default function MetricsScreen() {
               icon="flash-outline"
               label="P95 Latência"
               value={m.agent_performance.p95_latency_ms.toFixed(0)}
-              unit="ms"
-            />
-          </View>
-          <View style={styles.tileGrid}>
-            <MetricTile
-              icon="cloud-outline"
-              label="BFA Latência Média"
-              value={m.agent_performance.avg_bfa_latency_ms.toFixed(0)}
-              unit="ms"
-            />
-            <MetricTile
-              icon="cloud-done-outline"
-              label="BFA P95 Latência"
-              value={m.agent_performance.p95_bfa_latency_ms.toFixed(0)}
               unit="ms"
             />
           </View>
@@ -314,6 +324,44 @@ const styles = StyleSheet.create({
   statusText: { fontSize: fontSize.sm, fontWeight: fontWeight.semibold },
   cardWrap: { paddingHorizontal: spacing.xl },
   tileGrid: { flexDirection: 'row', gap: spacing.md, paddingHorizontal: spacing.xl, marginBottom: spacing.md },
+
+  // ─── BFA Card ─────────────────────────────────────────
+  bfaCard: {
+    marginHorizontal: spacing.xl,
+    marginBottom: spacing.md,
+    paddingVertical: spacing.xl,
+    paddingHorizontal: spacing.xl,
+  },
+  bfaRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  bfaStat: {
+    flex: 1,
+    alignItems: 'center',
+    gap: spacing.xs,
+  },
+  bfaValue: {
+    fontSize: fontSize.xl,
+    fontWeight: fontWeight.black,
+    color: colors.textPrimary,
+    marginTop: spacing.xs,
+  },
+  bfaUnit: {
+    fontSize: fontSize.xs,
+    fontWeight: fontWeight.medium,
+    color: colors.textMuted,
+  },
+  bfaLabel: {
+    fontSize: fontSize.xs,
+    color: colors.textMuted,
+    fontWeight: fontWeight.medium,
+  },
+  bfaDivider: {
+    width: 1,
+    height: 48,
+    backgroundColor: colors.borderLight,
+  },
 
   // ─── Counts Row ───────────────────────────────────────
   countsRow: {
