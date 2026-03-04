@@ -13,10 +13,11 @@ import * as Haptics from 'expo-haptics'
 import { colors, spacing, radius, fontSize, fontWeight } from '@/theme'
 import AsyncStorage from '@react-native-async-storage/async-storage'
 import { useAuthStore } from '@/stores/auth.store'
-import { useOnboardingChatStore } from '@/stores'
+import { useCustomerStore, useOnboardingChatStore, useChatStore } from '@/stores'
 import { authService } from '@/services/auth.service'
 import { ChatBubble, ChatInput, TypingIndicator } from '@/components/chat'
 import { getOnboardingProgress } from '@/types'
+import { resetDeviceId } from '@/lib'
 import type {
   AuthStep, LoginRequest, RegisterStep1Data,
   RegisterStep2Data, RegisterStep3Data,
