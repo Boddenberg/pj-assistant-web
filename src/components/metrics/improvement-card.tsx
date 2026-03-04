@@ -20,7 +20,7 @@ export function ImprovementCard({ suggestion, count }: ImprovementCardProps) {
           <Ionicons name="bulb-outline" size={16} color={colors.warning} />
         </View>
         <View style={styles.textCol}>
-          <Text style={styles.suggestion} numberOfLines={2}>{suggestion}</Text>
+          <Text style={styles.suggestion}>{suggestion}</Text>
           <Text style={styles.count}>{count}× mencionado</Text>
         </View>
       </View>
