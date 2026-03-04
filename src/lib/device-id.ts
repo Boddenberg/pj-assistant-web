@@ -55,15 +55,18 @@ export function resetDeviceIdCache(): void {
 }
 
 /**
- * Fully resets the device ID: clears in-memory cache AND removes
- * the persisted value from AsyncStorage. Next call to getDeviceId()
- * will generate a brand-new UUID.
+ * Fully resets the device ID: generates a brand-new UUID, caches it
+ * in memory and persists to AsyncStorage **atomically**.
+ * Any subsequent call to getDeviceId() returns the new ID immediately
+ * — no window where the old value could be read back from storage.
  */
-export async function resetDeviceId(): Promise<void> {
-  cachedDeviceId = null
+export async function resetDeviceId(): Promise<string> {
+  const newId = generateUUID()
+  cachedDeviceId = newId            // instant — no race
   try {
-    await AsyncStorage.removeItem(STORAGE_KEY)
+    await AsyncStorage.setItem(STORAGE_KEY, newId)
   } catch {
-    // best-effort
+    // persistence is best-effort; in-memory value is authoritative
   }
+  return newId
 }

@@ -1,5 +1,5 @@
 import AsyncStorage from '@react-native-async-storage/async-storage'
-import { getDeviceId, resetDeviceIdCache } from '@/lib/device-id'
+import { getDeviceId, resetDeviceIdCache, resetDeviceId } from '@/lib/device-id'
 
 // AsyncStorage is auto-mocked by jest-expo
 
@@ -73,5 +73,26 @@ describe('getDeviceId', () => {
 
     expect(second).toBe('new-stored-id')
     expect(first).not.toBe(second)
+  })
+
+  it('resetDeviceId generates a new UUID atomically', async () => {
+    ;(AsyncStorage.getItem as jest.Mock).mockResolvedValue(null)
+    ;(AsyncStorage.setItem as jest.Mock).mockResolvedValue(undefined)
+
+    const first = await getDeviceId()
+    const newId = await resetDeviceId()
+
+    // Returns a valid UUID, different from the previous one
+    expect(newId).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/)
+    expect(newId).not.toBe(first)
+
+    // Persists the new ID immediately
+    expect(AsyncStorage.setItem).toHaveBeenCalledWith('@pj_assistant_device_id', newId)
+
+    // Subsequent getDeviceId() returns the new ID (no AsyncStorage read)
+    ;(AsyncStorage.getItem as jest.Mock).mockReset()
+    const afterReset = await getDeviceId()
+    expect(afterReset).toBe(newId)
+    expect(AsyncStorage.getItem).not.toHaveBeenCalled()
   })
 })

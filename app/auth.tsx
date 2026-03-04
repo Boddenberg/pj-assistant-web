@@ -10,14 +10,13 @@ import {
 } from 'react-native'
 import { Ionicons } from '@expo/vector-icons'
 import * as Haptics from 'expo-haptics'
-import AsyncStorage from '@react-native-async-storage/async-storage'
 import { colors, spacing, radius, fontSize, fontWeight } from '@/theme'
+import AsyncStorage from '@react-native-async-storage/async-storage'
 import { useAuthStore } from '@/stores/auth.store'
-import { useCustomerStore, useOnboardingChatStore, useChatStore } from '@/stores'
+import { useOnboardingChatStore } from '@/stores'
 import { authService } from '@/services/auth.service'
 import { ChatBubble, ChatInput, TypingIndicator } from '@/components/chat'
 import { getOnboardingProgress } from '@/types'
-import { resetDeviceIdCache, resetDeviceId } from '@/lib'
 import type {
   AuthStep, LoginRequest, RegisterStep1Data,
   RegisterStep2Data, RegisterStep3Data,
@@ -935,14 +934,9 @@ export default function AuthScreen() {
     }
   }, [currentStep])
 
-  // DevTool: full reset — clears chat, device ID, and reloads
-  const handleResetDevSession = useCallback(async () => {
+  // DevTool: reset onboarding chat
+  const handleResetDevSession = useCallback(() => {
     aiClearChat()
-    resetDeviceIdCache()
-    await AsyncStorage.removeItem('@pj_assistant_device_id').catch(() => {})
-    if (Platform.OS === 'web') {
-      window.location.reload()
-    }
   }, [aiClearChat])
 
   const aiProgress = getOnboardingProgress(aiStep)
