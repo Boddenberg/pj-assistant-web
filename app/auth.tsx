@@ -932,12 +932,14 @@ export default function AuthScreen() {
   useEffect(() => {
     if (currentStep === 'open-ai-chat') {
       aiClearChat()
+      resetDeviceId()   // new device ID → backend sees a fresh session
     }
   }, [currentStep])
 
   // DevTool: reset onboarding chat
   const handleResetDevSession = useCallback(() => {
     aiClearChat()
+    resetDeviceId()   // new device ID → backend discards old attempts
   }, [aiClearChat])
 
   const aiProgress = getOnboardingProgress(aiStep)
@@ -995,6 +997,7 @@ export default function AuthScreen() {
           onPress={() => {
             haptic()
             aiClearChat()
+            resetDeviceId()
             animateTransition('welcome')
           }}
           style={aiStyles.headerBackBtn}
@@ -1110,6 +1113,7 @@ export default function AuthScreen() {
                 onPress={() => {
                   haptic()
                   aiClearChat()
+                  resetDeviceId()
                   animateTransition('login')
                 }}
                 activeOpacity={0.7}
