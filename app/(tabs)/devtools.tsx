@@ -341,6 +341,7 @@ export default function DevToolsScreen() {
                     cardId: ccSelectedCard,
                     amount: purchaseVal,
                     count: 1,
+                    mode: 'today',
                   })
                   queryClient.invalidateQueries({ queryKey: creditCardKeys.all })
                   setLastResult(`✅ Compra de ${formatCurrency(purchaseVal)} adicionada ao cartão •••• ${card?.lastFourDigits}`)
@@ -374,6 +375,7 @@ export default function DevToolsScreen() {
                     cardId: ccSelectedCard,
                     amount: purchaseVal,
                     count: ccPurchaseCount,
+                    mode: 'random',
                   })
                   queryClient.invalidateQueries({ queryKey: creditCardKeys.all })
                   setLastResult(`✅ ${ccPurchaseCount} compra(s) de ${formatCurrency(purchaseVal)} adicionada(s) ao cartão •••• ${card?.lastFourDigits}`)

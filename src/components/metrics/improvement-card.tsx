@@ -1,9 +1,8 @@
 // ─── Improvement Card ────────────────────────────────────────────────
 // Shows top improvement suggestions from LLM Judge.
-// Tap to expand/collapse long suggestions.
 
-import React, { useState, useCallback } from 'react'
-import { View, Text, StyleSheet, Pressable } from 'react-native'
+import React from 'react'
+import { View, Text, StyleSheet } from 'react-native'
 import { Ionicons } from '@expo/vector-icons'
 import { Card } from '@/components/ui'
 import { colors, spacing, radius, fontSize, fontWeight } from '@/theme'
@@ -14,43 +13,18 @@ interface ImprovementCardProps {
 }
 
 export function ImprovementCard({ suggestion, count }: ImprovementCardProps) {
-  const [expanded, setExpanded] = useState(false)
-  const [needsExpand, setNeedsExpand] = useState(false)
-
-  const onTextLayout = useCallback((e: { nativeEvent: { lines: unknown[] } }) => {
-    // If the text has more than 2 lines, show the expand affordance
-    if (e.nativeEvent.lines.length > 2) {
-      setNeedsExpand(true)
-    }
-  }, [])
-
   return (
-    <Pressable onPress={() => needsExpand && setExpanded((v) => !v)}>
-      <Card style={styles.card}>
-        <View style={styles.row}>
-          <View style={styles.iconWrap}>
-            <Ionicons name="bulb-outline" size={16} color={colors.warning} />
-          </View>
-          <View style={styles.textCol}>
-            <Text
-              style={styles.suggestion}
-              numberOfLines={expanded ? undefined : 2}
-              onTextLayout={onTextLayout as never}
-            >
-              {suggestion}
-            </Text>
-            <View style={styles.bottomRow}>
-              <Text style={styles.count}>{count}× mencionado</Text>
-              {needsExpand && (
-                <Text style={styles.toggle}>
-                  {expanded ? 'ver menos' : 'ver mais'}
-                </Text>
-              )}
-            </View>
-          </View>
+    <Card style={styles.card}>
+      <View style={styles.row}>
+        <View style={styles.iconWrap}>
+          <Ionicons name="bulb-outline" size={16} color={colors.warning} />
         </View>
-      </Card>
-    </Pressable>
+        <View style={styles.textCol}>
+          <Text style={styles.suggestion} numberOfLines={2}>{suggestion}</Text>
+          <Text style={styles.count}>{count}× mencionado</Text>
+        </View>
+      </View>
+    </Card>
   )
 }
 
@@ -86,16 +60,6 @@ const styles = StyleSheet.create({
   count: {
     fontSize: fontSize['2xs'],
     color: colors.textMuted,
-  },
-  bottomRow: {
-    flexDirection: 'row' as const,
-    justifyContent: 'space-between' as const,
-    alignItems: 'center' as const,
     marginTop: spacing['2xs'],
-  },
-  toggle: {
-    fontSize: fontSize['2xs'],
-    color: colors.primary,
-    fontWeight: fontWeight.medium,
   },
 })
