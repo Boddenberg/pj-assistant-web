@@ -92,7 +92,7 @@ export default function CreditCardScreen() {
 
   const { data: cards, isLoading } = useCreditCards(customerId)
   const { data: totalCreditLimit, isLoading: isLoadingLimit } = useCreditLimit(customerId)
-  const { data: availableData, isLoading: isLoadingAvailable } = useAvailableCards(customerId)
+  const { data: availableData, isLoading: isLoadingAvailable, error: availableError } = useAvailableCards(customerId)
   const requestCard = useRequestCreditCard()
   const cancelCard = useCancelCreditCard()
 
@@ -305,6 +305,29 @@ export default function CreditCardScreen() {
               <View style={{ alignItems: 'center', paddingVertical: spacing['2xl'] }}>
                 <ActivityIndicator size="small" color={colors.itauOrange} />
                 <Text style={{ color: colors.textMuted, fontSize: fontSize.sm, marginTop: spacing.sm }}>Carregando catálogo...</Text>
+              </View>
+            ) : availableError ? (
+              <View style={s.empty}>
+                <Ionicons name="warning-outline" size={44} color={colors.warning} />
+                <Text style={s.emptyTitle}>Erro ao carregar catálogo</Text>
+                <Text style={s.emptyDesc}>
+                  {availableError instanceof AppError ? availableError.message : 'Não foi possível buscar os cartões disponíveis. Tente novamente.'}
+                </Text>
+                <TouchableOpacity style={s.emptyBtn} onPress={handleRefresh} activeOpacity={0.8}>
+                  <Text style={s.emptyBtnText}>Tentar novamente</Text>
+                </TouchableOpacity>
+              </View>
+            ) : catalogProducts.length === 0 ? (
+              <View style={s.empty}>
+                <Ionicons name="alert-circle-outline" size={44} color={colors.error} />
+                <Text style={s.emptyTitle}>Nenhum cartão disponível</Text>
+                <Text style={s.emptyDesc}>
+                  {(totalCreditLimit ?? 0) <= 0
+                    ? 'Você ainda não possui limite de crédito aprovado. Entre em contato com seu gerente para solicitar uma análise de crédito.'
+                    : availableCredit <= 0
+                      ? 'Seu limite de crédito já está totalmente alocado em cartões existentes. Cancele um cartão ou solicite aumento de limite.'
+                      : 'Não há produtos de cartão disponíveis para o seu perfil no momento.'}
+                </Text>
               </View>
             ) : catalogProducts.map((p) => {
               const maxForCustomer = Math.min(p.customerMaxLimit, availableCredit)
