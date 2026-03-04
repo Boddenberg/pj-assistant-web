@@ -57,6 +57,7 @@ export const useOnboardingChatStore = create<OnboardingChatState>(
           sanitized,
           conversationId ?? undefined,
           history.length > 0 ? history : undefined,
+          false, // onboarding is always unauthenticated
         )
 
         const assistantMessage: ChatMessage = {
@@ -95,7 +96,18 @@ export const useOnboardingChatStore = create<OnboardingChatState>(
             ? err
             : new AppError(ErrorCode.UNKNOWN, 'Erro inesperado.', err)
 
-        set({ isLoading: false, error: appError })
+        const errorMessage: ChatMessage = {
+          id: generateId(),
+          role: 'assistant',
+          content: 'Poxa! Acho que perdi a conexão. Pode digitar novamente? 🔄',
+          timestamp: new Date().toISOString(),
+        }
+
+        set((state) => ({
+          messages: [...state.messages, errorMessage],
+          isLoading: false,
+          error: appError,
+        }))
       }
     },
 

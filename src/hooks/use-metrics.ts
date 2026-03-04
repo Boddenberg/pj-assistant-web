@@ -10,7 +10,6 @@ export function useHealthStatus() {
   return useQuery({
     queryKey: metricsKeys.health,
     queryFn: () => metricsService.health(),
-    refetchInterval: 30_000,
   })
 }
 
@@ -19,6 +18,5 @@ export function useChatMetrics() {
     queryKey: metricsKeys.chat,
     queryFn: () => metricsService.chatMetrics(),
     staleTime: 15_000,
-    refetchInterval: 30_000,
   })
 }

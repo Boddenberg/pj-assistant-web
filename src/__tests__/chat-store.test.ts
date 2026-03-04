@@ -64,7 +64,9 @@ describe('useChatStore', () => {
     const state = useChatStore.getState()
     expect(state.isLoading).toBe(false)
     expect(state.error).not.toBeNull()
-    expect(state.messages).toHaveLength(1) // user message only
+    expect(state.messages).toHaveLength(2) // user message + error bubble
+    expect(state.messages[1].role).toBe('assistant')
+    expect(state.messages[1].content).toContain('perdi a conexão')
   })
 
   it('ignores empty input after sanitization', async () => {

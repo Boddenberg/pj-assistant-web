@@ -1,6 +1,7 @@
 import { create } from 'zustand'
 import type { ChatMessage } from '@/types'
 import { assistantService } from '@/services'
+import { useAuthStore } from '@/stores/auth.store'
 import { generateId, sanitizeInput, AppError, ErrorCode } from '@/lib'
 
 interface ChatState {
@@ -41,6 +42,8 @@ export const useChatStore = create<ChatState>((set, get) => ({
       const response = await assistantService.chat(
         sanitized,
         get().conversationId ?? undefined,
+        undefined,
+        useAuthStore.getState().isAuthenticated,
       )
 
       const assistantMessage: ChatMessage = {
@@ -61,7 +64,18 @@ export const useChatStore = create<ChatState>((set, get) => ({
           ? err
           : new AppError(ErrorCode.UNKNOWN, 'Erro inesperado.', err)
 
-      set({ isLoading: false, error: appError })
+      const errorMessage: ChatMessage = {
+        id: generateId(),
+        role: 'assistant',
+        content: 'Poxa! Acho que perdi a conexão. Pode digitar novamente? 🔄',
+        timestamp: new Date().toISOString(),
+      }
+
+      set((state) => ({
+        messages: [...state.messages, errorMessage],
+        isLoading: false,
+        error: appError,
+      }))
     }
   },
 

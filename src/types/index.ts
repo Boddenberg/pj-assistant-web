@@ -35,6 +35,8 @@ export type {
   CreditCard, CreditCardBrand, CreditCardStatus,
   CreditCardRequest, CreditCardResponse, CreditCardRequestStatus,
   CreditCardInvoice, InvoiceStatus, CreditCardTransaction,
+  CardProduct, CardProductId,
+  AvailableCardProduct, AvailableCardsResponse,
 } from './credit-card'
 
 export type {

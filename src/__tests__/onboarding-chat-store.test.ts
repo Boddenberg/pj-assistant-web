@@ -91,6 +91,7 @@ describe('useOnboardingChatStore', () => {
       'Quero abrir conta',
       'onb-1',
       [{ query: 'Oi', answer: 'Olá!', step: null, validated: null }],
+      false,
     )
 
     const state = useOnboardingChatStore.getState()
@@ -204,7 +205,9 @@ describe('useOnboardingChatStore', () => {
     const state = useOnboardingChatStore.getState()
     expect(state.history).toHaveLength(0)
     expect(state.error).not.toBeNull()
-    expect(state.messages).toHaveLength(1)
+    expect(state.messages).toHaveLength(2) // user message + error bubble
+    expect(state.messages[1].role).toBe('assistant')
+    expect(state.messages[1].content).toContain('perdi a conexão')
   })
 
   it('clearChat resets all state', () => {
@@ -238,7 +241,7 @@ describe('useOnboardingChatStore', () => {
 
     await useOnboardingChatStore.getState().sendMessage('Hello')
 
-    expect(mockedChat).toHaveBeenCalledWith('Hello', undefined, undefined)
+    expect(mockedChat).toHaveBeenCalledWith('Hello', undefined, undefined, false)
   })
 
   it('ignores empty input', async () => {

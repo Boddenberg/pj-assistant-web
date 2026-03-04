@@ -302,29 +302,53 @@ export default function AuthScreen() {
     haptic()
     setLoading(true)
     setGeneralError('')
-    try {
-      const response = await authService.login({
-        cpf,
-        password: loginForm.password,
-      })
-      setCustomerId(response.customerId)
-      saveCpf(loginForm.cpf) // Remember CPF for next login
-      // Reset chat & device ID so logged-in session starts fresh
-      useChatStore.getState().clearChat()
-      await resetDeviceId()
 
-      setAuthenticated({
-        accessToken: response.accessToken,
-        refreshToken: response.refreshToken,
-        customerId: response.customerId,
-        customerName: response.customerName,
-        companyName: response.companyName,
-      })
-    } catch {
-      setGeneralError('CPF ou senha incorretos. Tente novamente.')
-    } finally {
-      setLoading(false)
+    // Retry logic: up to 4 attempts (~15s total: 0 + 2s + 4s + 8s delays)
+    const MAX_ATTEMPTS = 4
+    let lastError: unknown = null
+
+    for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
+      try {
+        const response = await authService.login({
+          cpf,
+          password: loginForm.password,
+        })
+        setCustomerId(response.customerId)
+        saveCpf(loginForm.cpf) // Remember CPF for next login
+        // Reset chat & device ID so logged-in session starts fresh
+        useChatStore.getState().clearChat()
+        await resetDeviceId()
+
+        setAuthenticated({
+          accessToken: response.accessToken,
+          refreshToken: response.refreshToken,
+          customerId: response.customerId,
+          customerName: response.customerName,
+          companyName: response.companyName,
+        })
+        setLoading(false)
+        return // success — exit early
+      } catch (err) {
+        lastError = err
+        // Don't retry on 401/403 (wrong credentials)
+        const status = (err as { response?: { status?: number } })?.response?.status
+        if (status === 401 || status === 403) break
+
+        // Wait before next attempt (2s, 4s, 8s)
+        if (attempt < MAX_ATTEMPTS) {
+          await new Promise((r) => setTimeout(r, Math.pow(2, attempt) * 1000))
+        }
+      }
     }
+
+    // All attempts failed
+    const status = (lastError as { response?: { status?: number } })?.response?.status
+    if (status === 401 || status === 403) {
+      setGeneralError('CPF ou senha incorretos. Tente novamente.')
+    } else {
+      setGeneralError('Não foi possível conectar. Verifique sua internet e tente novamente.')
+    }
+    setLoading(false)
   }
 
   // ─── Register Validation ────────────────────────────────────────
@@ -404,10 +428,21 @@ export default function AuthScreen() {
           <Text style={styles.logoText}>Itaú</Text>
           <Text style={styles.logoSuffix}>Empresas</Text>
         </View>
-        <Text style={styles.heroTitle}>Sua empresa{'\n'}no controle</Text>
-        <Text style={styles.heroSubtitle}>
-          Gestão financeira PJ com inteligência artificial.{'\n'}
-          Simples, seguro e completo.
+
+        <View style={styles.caseBadgeRow}>
+          <View style={styles.caseBadge}>
+            <Text style={styles.caseBadgeText}>CASE TÉCNICO</Text>
+          </View>
+          <Text style={styles.caseDividerDot}>·</Text>
+          <Text style={styles.caseTeam}>Time de Inteligência</Text>
+        </View>
+
+        <Text style={styles.heroTitle}>Engenheiro{'\n'}Sênior</Text>
+        <Text style={styles.caseProduct}>BFA em Go + IA Generativa</Text>
+
+        <View style={styles.caseSeparator} />
+        <Text style={styles.caseDescription}>
+          Assistente conversacional inteligente para clientes PJ — Backend Go com arquitetura hexagonal, Agente LLM com LangGraph e RAG.
         </Text>
       </View>
 
@@ -1292,6 +1327,51 @@ const styles = StyleSheet.create({
     fontSize: fontSize.md,
     color: 'rgba(255,255,255,0.8)',
     lineHeight: 24,
+  },
+
+  // Case info (integrated into hero)
+  caseBadgeRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.sm,
+    marginBottom: spacing.lg,
+  },
+  caseBadge: {
+    backgroundColor: '#FFD700',
+    paddingHorizontal: spacing.sm,
+    paddingVertical: 3,
+    borderRadius: radius.sm,
+  },
+  caseBadgeText: {
+    fontSize: 10,
+    fontWeight: fontWeight.bold,
+    color: '#1a1a2e',
+    letterSpacing: 1.2,
+  },
+  caseDividerDot: {
+    fontSize: fontSize.sm,
+    color: 'rgba(255,255,255,0.4)',
+  },
+  caseTeam: {
+    fontSize: fontSize.xs,
+    color: 'rgba(255,255,255,0.7)',
+    fontWeight: fontWeight.semibold,
+  },
+  caseProduct: {
+    fontSize: fontSize.md,
+    color: '#FFD700',
+    fontWeight: fontWeight.bold,
+    marginBottom: spacing.md,
+  },
+  caseSeparator: {
+    height: 1,
+    backgroundColor: 'rgba(255,255,255,0.12)',
+    marginBottom: spacing.md,
+  },
+  caseDescription: {
+    fontSize: fontSize.sm,
+    color: 'rgba(255,255,255,0.7)',
+    lineHeight: 20,
   },
 
   welcomeActions: {

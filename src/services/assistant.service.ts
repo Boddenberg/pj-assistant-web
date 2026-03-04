@@ -1,18 +1,29 @@
-import { httpClient, getDeviceId } from '@/lib'
+import { httpClient } from '@/lib'
 import type { ChatApiResponse, HistoryEntry } from '@/types'
+import { useCustomerStore } from '@/stores/customer.store'
 
 export const assistantService = {
   async chat(
     query: string,
     conversationId?: string,
     history?: HistoryEntry[],
+    isAuthenticated = false,
   ): Promise<ChatApiResponse> {
-    const deviceId = await getDeviceId()
-    const base = `/v1/chat/${encodeURIComponent(deviceId)}`
+    const customerId = useCustomerStore.getState().customerId
+
+    // Authenticated users: POST /v1/chat/:customerId
+    // Anonymous (onboarding): POST /v1/chat
+    const base = customerId
+      ? `/v1/chat/${encodeURIComponent(customerId)}`
+      : '/v1/chat'
     const path = conversationId
       ? `${base}/${encodeURIComponent(conversationId)}`
       : base
-    const body: Record<string, unknown> = { query }
+
+    const body: Record<string, unknown> = {
+      query,
+      is_authenticated: isAuthenticated,
+    }
     if (history?.length) {
       body.history = history
     }

@@ -1,13 +1,16 @@
 // ─── Dev Tools Screen ─────────────────────────────────────────────────
 // Testing utilities — add balance, credit limit, generate transactions.
 
-import React, { useState, useCallback } from 'react'
-import { View, Text, ScrollView, StyleSheet, TouchableOpacity, Alert, Platform, TextInput, Modal, FlatList } from 'react-native'
+import React, { useState, useCallback, useRef } from 'react'
+import { View, Text, ScrollView, StyleSheet, TouchableOpacity, Alert, Platform, TextInput, Modal, FlatList, Switch } from 'react-native'
+import { useSafeAreaInsets } from 'react-native-safe-area-context'
+import * as Clipboard from 'expo-clipboard'
 import { Ionicons } from '@expo/vector-icons'
 import * as Haptics from 'expo-haptics'
 import { useQueryClient } from '@tanstack/react-query'
 import { colors, spacing, radius, fontSize, fontWeight, shadow } from '@/theme'
 import { useCustomerStore } from '@/stores'
+import { useNetworkLogStore, type NetworkLogEntry } from '@/stores/network-log.store'
 import { transactionKeys, useCreditCards, creditCardKeys, financialKeys, accountKeys } from '@/hooks'
 import { httpClient, formatCurrency, AppError } from '@/lib'
 
@@ -33,8 +36,8 @@ export default function DevToolsScreen() {
   const customerId = useCustomerStore((s) => s.customerId)
   const { data: cards } = useCreditCards(customerId)
   const [loading, setLoading] = useState<string | null>(null)
-  const [balanceAmount, setBalanceAmount] = useState(10000)
-  const [creditLimitAmount, setCreditLimitAmount] = useState(50000)
+  const [balanceAmount, setBalanceAmount] = useState(1000)
+  const [creditLimitAmount, setCreditLimitAmount] = useState(10000)
   const [lastResult, setLastResult] = useState<string | null>(null)
   const [generatedTxs, setGeneratedTxs] = useState<GeneratedTransaction[]>([])
   const [showTxModal, setShowTxModal] = useState(false)
@@ -43,6 +46,15 @@ export default function DevToolsScreen() {
   const [ccPurchaseAmount, setCcPurchaseAmount] = useState('150')
   const [ccSelectedCard, setCcSelectedCard] = useState<string | null>(null)
   const [ccPurchaseCount, setCcPurchaseCount] = useState(3)
+
+  // Network log
+  const netEnabled = useNetworkLogStore((s) => s.enabled)
+  const netEntries = useNetworkLogStore((s) => s.entries)
+  const netToggle = useNetworkLogStore((s) => s.toggle)
+  const netClear = useNetworkLogStore((s) => s.clear)
+  const netLogRef = useRef<FlatList<NetworkLogEntry>>(null)
+  const [showNetLog, setShowNetLog] = useState(false)
+  const insets = useSafeAreaInsets()
 
   const activeCards = cards?.filter((c) => c.status === 'active') ?? []
 
@@ -79,17 +91,6 @@ export default function DevToolsScreen() {
 
         setLastResult(`✅ ${count} transações geradas — receitas (${formatCurrency(totalIn)}) / despesas (${formatCurrency(totalOut)}) · Impacto no saldo: ${netImpact >= 0 ? '+' : ''}${formatCurrency(netImpact)}`)
       } else if (action === 'add-balance') {
-        // Also generate a credit transaction so it shows as income in financial analysis
-        try {
-          await httpClient.post(`/v1/dev/generate-transactions`, {
-            customerId: customerId ?? 'dev-customer',
-            count: 1,
-            period: 'current-month',
-            forceType: 'credit',
-            forceAmount: body.amount,
-            forceDescription: 'Depósito / Aporte',
-          })
-        } catch { /* best-effort — backend may not support forceType */ }
         setLastResult(`✅ ${action}: Saldo atualizado — ${formatCurrency(data?.newBalance ?? body.amount as number)}`)
       } else {
         setLastResult(`✅ ${action}: ${JSON.stringify(data).slice(0, 120)}`)
@@ -120,6 +121,37 @@ export default function DevToolsScreen() {
         <View style={styles.bannerText}>
           <Text style={styles.bannerTitle}>Modo Desenvolvedor</Text>
           <Text style={styles.bannerSubtitle}>Ferramentas de teste — não disponível em produção</Text>
+        </View>
+      </View>
+
+      {/* Logged-in User ID */}
+      <View style={styles.section}>
+        <View style={styles.sectionHeader}>
+          <View style={[styles.sectionIcon, { backgroundColor: colors.itauOrangeSoft }]}>
+            <Ionicons name="person-outline" size={20} color={colors.itauOrange} />
+          </View>
+          <View style={{ flex: 1 }}>
+            <Text style={styles.sectionTitle}>Usuário Logado</Text>
+            <Text style={styles.sectionSubtitle}>Customer ID na sessão atual</Text>
+          </View>
+        </View>
+        <View style={styles.userIdRow}>
+          <Text style={styles.userIdText} selectable numberOfLines={1}>
+            {customerId ?? 'Nenhum usuário logado'}
+          </Text>
+          <TouchableOpacity
+            style={styles.copyBtn}
+            onPress={async () => {
+              if (!customerId) return
+              await Clipboard.setStringAsync(customerId)
+              haptic()
+              setLastResult('✅ Customer ID copiado para a área de transferência')
+            }}
+            activeOpacity={0.7}
+          >
+            <Ionicons name="copy-outline" size={18} color={colors.textInverse} />
+            <Text style={styles.copyBtnText}>Copiar</Text>
+          </TouchableOpacity>
         </View>
       </View>
 
@@ -365,6 +397,53 @@ export default function DevToolsScreen() {
         )}
       </View>
 
+      {/* ─── Network Inspector Toggle ─────────────────────────── */}
+      <View style={styles.section}>
+        <View style={styles.sectionHeader}>
+          <View style={[styles.sectionIcon, { backgroundColor: '#E3F2FD' }]}>
+            <Ionicons name="radio-outline" size={20} color="#1976D2" />
+          </View>
+          <View style={{ flex: 1 }}>
+            <Text style={styles.sectionTitle}>Network Inspector</Text>
+            <Text style={styles.sectionSubtitle}>Puxe a lista pra baixo para capturar</Text>
+          </View>
+          <Switch
+            value={netEnabled}
+            onValueChange={() => { netToggle(); haptic() }}
+            trackColor={{ false: colors.borderLight, true: colors.itauOrange }}
+            thumbColor={netEnabled ? '#fff' : '#f4f3f4'}
+          />
+        </View>
+
+        {netEnabled && (
+          <View style={{ gap: spacing.md }}>
+            <Text style={{ color: colors.textMuted, fontSize: fontSize.xs }}>
+              {netEntries.length} entradas capturadas
+            </Text>
+
+            <View style={{ flexDirection: 'row', gap: spacing.md }}>
+              <TouchableOpacity
+                style={[styles.actionBtn, { flex: 1, backgroundColor: '#1976D2' }]}
+                onPress={() => { setShowNetLog(true); haptic() }}
+                activeOpacity={0.7}
+              >
+                <Ionicons name="code-working-outline" size={20} color="#fff" />
+                <Text style={styles.actionBtnText}>Ver Logs ({netEntries.length})</Text>
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                style={[styles.actionBtn, { flex: 1, backgroundColor: colors.error }]}
+                onPress={() => { netClear(); haptic() }}
+                activeOpacity={0.7}
+              >
+                <Ionicons name="trash-outline" size={20} color="#fff" />
+                <Text style={styles.actionBtnText}>Limpar</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        )}
+      </View>
+
       {/* Result feedback */}
       {lastResult && (
         <View style={[styles.resultBanner, lastResult.startsWith('✅') ? styles.resultSuccess : styles.resultError]}>
@@ -434,9 +513,187 @@ export default function DevToolsScreen() {
         </TouchableOpacity>
       </TouchableOpacity>
     </Modal>
+
+    {/* ── Network Log Modal (FULLSCREEN) ────────────────── */}
+    <Modal visible={showNetLog} animationType="slide" transparent={false}>
+      <View style={{ flex: 1, backgroundColor: '#0d1117', paddingTop: insets.top, paddingBottom: insets.bottom }}>
+        {/* Header */}
+        <View style={nlStyles.header}>
+          <View style={{ flex: 1 }}>
+            <Text style={nlStyles.headerTitle}>Network Inspector</Text>
+            <Text style={nlStyles.headerSub}>{netEntries.length} entradas</Text>
+          </View>
+          <TouchableOpacity
+            onPress={() => { netClear(); haptic() }}
+            style={nlStyles.headerBtn}
+          >
+            <Ionicons name="trash-outline" size={18} color={colors.error} />
+          </TouchableOpacity>
+          <TouchableOpacity
+            onPress={() => setShowNetLog(false)}
+            style={nlStyles.headerBtn}
+          >
+            <Ionicons name="close" size={22} color="#fff" />
+          </TouchableOpacity>
+        </View>
+
+        <FlatList
+          ref={netLogRef}
+          data={netEntries}
+          keyExtractor={(e) => e.id}
+          showsVerticalScrollIndicator
+          contentContainerStyle={{ padding: spacing.md, paddingBottom: spacing['4xl'] }}
+          onContentSizeChange={() => netLogRef.current?.scrollToEnd({ animated: true })}
+          renderItem={({ item }) => {
+            const isReq = item.type === 'request'
+            const isErr = item.type === 'error'
+            const bubbleBg = isReq ? '#161b22' : isErr ? '#2d1214' : '#122117'
+            const borderColor = isReq ? '#30363d' : isErr ? '#5c2325' : '#1e4d2b'
+            const accentColor = isReq ? '#58a6ff' : isErr ? '#f85149' : '#3fb950'
+            const label = isReq ? '→ REQ' : isErr ? '✗ ERR' : `← ${item.status ?? '?'}`
+            const time = new Date(item.timestamp).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit', second: '2-digit' })
+            const shortUrl = (item.url ?? '').replace(/^https?:\/\/[^/]+/, '')
+            const bodyStr = item.body ? JSON.stringify(item.body, null, 2) : null
+            const displayBody = bodyStr && bodyStr.length > 800 ? bodyStr.slice(0, 800) + '\n…' : bodyStr
+
+            return (
+              <View style={[nlStyles.bubble, { backgroundColor: bubbleBg, borderColor }]}>
+                {/* Top row: badge + method + duration */}
+                <View style={nlStyles.bubbleTop}>
+                  <View style={[nlStyles.badge, { backgroundColor: accentColor }]}>
+                    <Text style={nlStyles.badgeText}>{label}</Text>
+                  </View>
+                  <Text style={nlStyles.method}>{item.method}</Text>
+                  {item.durationMs != null && (
+                    <Text style={nlStyles.duration}>{item.durationMs}ms</Text>
+                  )}
+                  <Text style={nlStyles.time}>{time}</Text>
+                </View>
+
+                {/* URL */}
+                <Text style={nlStyles.url} numberOfLines={2}>{shortUrl}</Text>
+
+                {/* Body */}
+                {displayBody && (
+                  <View style={nlStyles.bodyContainer}>
+                    <Text style={nlStyles.body} selectable>{displayBody}</Text>
+                  </View>
+                )}
+
+                {/* Request ID */}
+                <Text style={nlStyles.reqId}>{item.requestId.slice(0, 12)}</Text>
+              </View>
+            )
+          }}
+          ListEmptyComponent={
+            <View style={{ alignItems: 'center', paddingVertical: 80 }}>
+              <Ionicons name="radio-outline" size={56} color="#30363d" />
+              <Text style={{ color: '#8b949e', fontSize: fontSize.md, marginTop: spacing.lg, fontWeight: fontWeight.semibold }}>
+                Nenhuma requisição capturada
+              </Text>
+              <Text style={{ color: '#484f58', fontSize: fontSize.sm, marginTop: spacing.sm }}>
+                Navegue pelo app para ver o tráfego
+              </Text>
+            </View>
+          }
+        />
+      </View>
+    </Modal>
     </>
   )
 }
+
+// ─── Network Log Styles (fullscreen dark theme) ──────────────────
+const nlStyles = StyleSheet.create({
+  header: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.md,
+    paddingHorizontal: spacing.lg,
+    paddingVertical: spacing.md,
+    borderBottomWidth: 1,
+    borderBottomColor: '#21262d',
+  },
+  headerTitle: {
+    fontSize: fontSize.lg,
+    fontWeight: '700' as const,
+    color: '#f0f6fc',
+  },
+  headerSub: {
+    fontSize: fontSize.xs,
+    color: '#8b949e',
+    marginTop: 2,
+  },
+  headerBtn: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: '#21262d',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  bubble: {
+    width: '100%',
+    borderRadius: radius.lg,
+    borderWidth: 1,
+    padding: spacing.lg,
+    marginBottom: spacing.md,
+  },
+  bubbleTop: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.sm,
+    marginBottom: spacing.sm,
+  },
+  badge: {
+    paddingHorizontal: spacing.sm,
+    paddingVertical: 3,
+    borderRadius: radius.sm,
+  },
+  badgeText: {
+    fontSize: 11,
+    fontWeight: '800' as const,
+    color: '#fff',
+    letterSpacing: 0.5,
+  },
+  method: {
+    fontSize: fontSize.sm,
+    fontWeight: '700' as const,
+    color: '#c9d1d9',
+  },
+  duration: {
+    fontSize: fontSize.xs,
+    color: '#8b949e',
+    marginLeft: 'auto',
+  },
+  time: {
+    fontSize: fontSize.xs,
+    color: '#484f58',
+  },
+  url: {
+    fontSize: fontSize.sm,
+    color: '#58a6ff',
+    marginBottom: spacing.sm,
+    lineHeight: 20,
+  },
+  bodyContainer: {
+    backgroundColor: 'rgba(0,0,0,0.4)',
+    borderRadius: radius.md,
+    padding: spacing.md,
+    marginBottom: spacing.sm,
+  },
+  body: {
+    fontSize: 12,
+    lineHeight: 18,
+    color: '#e6edf3',
+    fontFamily: Platform.OS === 'ios' ? 'Menlo' : 'monospace',
+  },
+  reqId: {
+    fontSize: 10,
+    color: '#30363d',
+    textAlign: 'right',
+  },
+})
 
 const styles = StyleSheet.create({
   scroll: { flex: 1, backgroundColor: colors.bgPrimary },
@@ -455,6 +712,37 @@ const styles = StyleSheet.create({
   bannerText: { flex: 1 },
   bannerTitle: { fontSize: fontSize.md, fontWeight: fontWeight.bold, color: colors.textPrimary },
   bannerSubtitle: { fontSize: fontSize.xs, color: colors.textSecondary, marginTop: spacing['2xs'] },
+
+  userIdRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.md,
+    backgroundColor: colors.bgPrimary,
+    borderRadius: radius.md,
+    paddingHorizontal: spacing.lg,
+    paddingVertical: spacing.md,
+  },
+  userIdText: {
+    flex: 1,
+    fontSize: fontSize.sm,
+    fontFamily: Platform.OS === 'ios' ? 'Menlo' : 'monospace',
+    color: colors.textPrimary,
+    letterSpacing: 0.3,
+  },
+  copyBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.xs,
+    backgroundColor: colors.itauOrange,
+    paddingHorizontal: spacing.lg,
+    paddingVertical: spacing.sm,
+    borderRadius: radius.md,
+  },
+  copyBtnText: {
+    fontSize: fontSize.sm,
+    fontWeight: fontWeight.semibold,
+    color: colors.textInverse,
+  },
 
   section: {
     backgroundColor: colors.bgSecondary,

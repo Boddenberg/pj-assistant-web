@@ -13,7 +13,7 @@ export const pixService = {
   async lookupKey(key: string, keyType: PixKeyType): Promise<PixKeyLookupResponse> {
     const { data } = await httpClient.get<PixKeyLookupResponse>(
       '/v1/pix/keys/lookup',
-      { params: { key, keyType } },
+      { params: { key, type: keyType } },
     )
     return data
   },
@@ -43,10 +43,12 @@ export const pixService = {
 
   /** List scheduled Pix transfers */
   async listScheduled(customerId: string): Promise<PixScheduleResponse[]> {
-    const { data } = await httpClient.get<PixScheduleResponse[]>(
-      `/v1/customers/${encodeURIComponent(customerId)}/pix/scheduled`,
+    const { data } = await httpClient.get<{ schedules: PixScheduleResponse[] } | PixScheduleResponse[]>(
+      `/v1/pix/scheduled/${encodeURIComponent(customerId)}`,
     )
-    return data
+    // Backend may return { schedules: [...] } wrapper
+    if (data && !Array.isArray(data) && 'schedules' in data) return data.schedules
+    return Array.isArray(data) ? data : []
   },
 
   /** Execute Pix via credit card */

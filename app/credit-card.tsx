@@ -1,1234 +1,895 @@
-// ─── Credit Card PJ Screen ───────────────────────────────────────────
-// Corporate card carousel with premium visual cards per brand,
-// detail panel below, invoice view, payment, contract flow.
+// ─── Credit Card PJ — Clean & Minimal ────────────────────────────────
 
 import React, { useState, useCallback, useMemo } from 'react'
 import {
   View, Text, ScrollView, StyleSheet, TouchableOpacity,
-  Modal, Platform, Alert, Dimensions, FlatList,
+  Modal, Platform, Alert, Dimensions, ActivityIndicator, RefreshControl,
 } from 'react-native'
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context'
 import { Ionicons } from '@expo/vector-icons'
 import * as Haptics from 'expo-haptics'
 import Slider from '@react-native-community/slider'
-import { LinearGradient } from 'expo-linear-gradient'
 
 import { useQueryClient } from '@tanstack/react-query'
 import { useCustomerStore } from '@/stores'
 import {
   useCreditCards, useCreditCardInvoice, useRequestCreditCard, useCancelCreditCard,
-  transactionKeys, creditCardKeys,
+  useCreditLimit, useAvailableCards, transactionKeys, creditCardKeys, accountKeys,
 } from '@/hooks'
 import { ActionButton, StatusBadge, SuccessSheet } from '@/components/ui'
-import { formatCurrency, httpClient, AppError } from '@/lib'
+import { formatCurrency, AppError } from '@/lib'
+import { creditCardService } from '@/services'
 import { colors, spacing, radius, fontSize, fontWeight, shadow } from '@/theme'
-import type { CreditCardBrand, CreditCard, CreditCardTransaction } from '@/types'
+import type { CreditCard, CreditCardTransaction, CardProduct, CardProductId, AvailableCardProduct } from '@/types'
 
-const { width: SCREEN_WIDTH } = Dimensions.get('window')
-const CARD_WIDTH = SCREEN_WIDTH - 64
-const CARD_HEIGHT = CARD_WIDTH * 0.6
-const CARD_SPACING = 16
+const { width: SW } = Dimensions.get('window')
 
-// ─── Brand Visual Config ─────────────────────────────────────────────
-interface BrandTheme {
+// ─── Visual config per product (not from API) ────────────────────────
+
+interface ProductVisual {
   gradient: readonly [string, string, string]
   accent: string
-  label: string
-  logoText: string
-  chipColor: string
   textColor: string
   textSecondary: string
+  logoText: string
 }
 
-const BRAND_THEMES: Record<CreditCardBrand, BrandTheme> = {
-  amex: {
-    gradient: ['#2D2D2D', '#3A3A3A', '#1A1A1A'],
-    accent: '#EC7000',
-    label: 'Cartão Corporativo Amex',
-    logoText: 'AMEX',
-    chipColor: '#C0C0C0',
-    textColor: '#FFFFFF',
-    textSecondary: 'rgba(255,255,255,0.7)',
+const PRODUCT_VISUALS: Record<CardProductId, ProductVisual> = {
+  'itau-pj-basic': {
+    gradient: ['#F5F5F8', '#EAEAEF', '#E0E0E5'], accent: '#EC7000',
+    textColor: '#1A1A1A', textSecondary: '#8C8C8C', logoText: 'BASIC',
   },
-  elo: {
-    gradient: ['#8C8C8C', '#A0A0A0', '#6E6E6E'],
-    accent: '#EC7000',
-    label: 'Cartão Corporativo Elo',
-    logoText: 'ELO',
-    chipColor: '#D0D0D0',
-    textColor: '#1A1A1A',
-    textSecondary: 'rgba(26,26,26,0.65)',
+  'itau-pj-gold': {
+    gradient: ['#EC7000', '#FF8C2E', '#EC7000'], accent: '#FFFFFF',
+    textColor: '#FFFFFF', textSecondary: 'rgba(255,255,255,0.75)', logoText: 'GOLD',
   },
-  mastercard: {
-    gradient: ['#EC7000', '#FF8C2E', '#CC5F00'],
-    accent: '#003882',
-    label: 'Cartão Corporativo Mastercard',
-    logoText: 'MC',
-    chipColor: '#E0E0E0',
-    textColor: '#FFFFFF',
-    textSecondary: 'rgba(255,255,255,0.8)',
+  'itau-pj-platinum': {
+    gradient: ['#1A1A1A', '#2D2D2D', '#1A1A1A'], accent: '#EC7000',
+    textColor: '#FFFFFF', textSecondary: 'rgba(255,255,255,0.6)', logoText: 'PLATINUM',
   },
-  visa: {
-    gradient: ['#0D1B2A', '#162D4A', '#091320'],
-    accent: '#EC7000',
-    label: 'Cartão Corporativo Visa',
-    logoText: 'VISA',
-    chipColor: '#C0C0C0',
-    textColor: '#FFFFFF',
-    textSecondary: 'rgba(255,255,255,0.7)',
+  'itau-pj-virtual': {
+    gradient: ['#003882', '#1A5BA6', '#003882'], accent: '#EC7000',
+    textColor: '#FFFFFF', textSecondary: 'rgba(255,255,255,0.65)', logoText: 'VIRTUAL',
   },
 }
 
-const BRAND_ACCENT: Record<CreditCardBrand, string> = {
-  amex: '#2D2D2D',
-  elo: '#6E6E6E',
-  mastercard: '#EC7000',
-  visa: '#0D1B2A',
+const DEFAULT_VISUAL: ProductVisual = {
+  gradient: ['#555', '#666', '#555'], accent: '#EC7000',
+  textColor: '#FFF', textSecondary: 'rgba(255,255,255,0.6)', logoText: '?',
 }
+
+function enrichProduct(raw: AvailableCardProduct): CardProduct {
+  const visual = PRODUCT_VISUALS[raw.id] ?? DEFAULT_VISUAL
+  return {
+    productId: raw.id,
+    name: raw.name,
+    brand: raw.brand.toLowerCase() as CardProduct['brand'],
+    description: raw.description,
+    minLimit: raw.minLimit,
+    maxLimit: raw.maxLimit,
+    annualFee: raw.annualFee,
+    isVirtual: raw.cardType === 'virtual',
+    benefits: raw.benefits.split(',').map((b) => b.trim()).filter(Boolean),
+    customerMaxLimit: raw.customerMaxLimit,
+    ...visual,
+  }
+}
+
+// ─── Helpers ─────────────────────────────────────────────────────────
+
+const haptic = () => { if (Platform.OS !== 'web') Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light) }
+
+function brandLabel(brand: string) {
+  const map: Record<string, string> = { visa: 'Visa', mastercard: 'Mastercard', elo: 'Elo', amex: 'Amex' }
+  return map[brand.toLowerCase()] ?? brand
+}
+
+// ─── Main Screen ─────────────────────────────────────────────────────
 
 export default function CreditCardScreen() {
   const customerId = useCustomerStore((s) => s.customerId)
   const queryClient = useQueryClient()
-  const { data: cards } = useCreditCards(customerId)
+
+  const { data: cards, isLoading } = useCreditCards(customerId)
+  const { data: totalCreditLimit, isLoading: isLoadingLimit } = useCreditLimit(customerId)
+  const { data: availableData, isLoading: isLoadingAvailable } = useAvailableCards(customerId)
   const requestCard = useRequestCreditCard()
   const cancelCard = useCancelCreditCard()
 
-  // Only active cards (filter out cancelled) — status comes from backend
   const activeCards = useMemo(() => cards?.filter((c) => c.status !== 'cancelled') ?? [], [cards])
+  const usedCreditLimit = useMemo(() => activeCards.reduce((sum, c) => sum + c.limit, 0), [activeCards])
+  const availableCredit = Math.max(0, (totalCreditLimit ?? 0) - usedCreditLimit)
+  const catalogProducts = useMemo(() => (availableData?.products ?? []).map(enrichProduct), [availableData])
 
-  const hasCards = activeCards.length > 0
-  const [tab, setTab] = useState<'cards' | 'offers'>('cards')
-  const [selectedIndex, setSelectedIndex] = useState(0)
-  const selectedCard = activeCards[selectedIndex] ?? null
+  const [tab, setTab] = useState<'cards' | 'catalog'>('cards')
+  const [refreshing, setRefreshing] = useState(false)
 
-  // Contract modal state
-  const [selectedBrand, setSelectedBrand] = useState<CreditCardBrand>('visa')
-  const [selectedDueDay, setSelectedDueDay] = useState(10)
-  const [requestedLimit, setRequestedLimit] = useState(5000)
-  const [showContractModal, setShowContractModal] = useState(false)
+  const handleRefresh = useCallback(async () => {
+    setRefreshing(true)
+    await Promise.all([
+      queryClient.invalidateQueries({ queryKey: creditCardKeys.all }),
+      queryClient.invalidateQueries({ queryKey: accountKeys.all }),
+    ])
+    setRefreshing(false)
+  }, [queryClient])
+
+  // Contract
+  const [contractProduct, setContractProduct] = useState<CardProduct | null>(null)
+  const [reqLimit, setReqLimit] = useState(5000)
+  const [dueDay, setDueDay] = useState(10)
   const [showSuccess, setShowSuccess] = useState(false)
+  const [successInfo, setSuccessInfo] = useState<{ name: string; limit: number; dueDay: number } | null>(null)
 
-  // Invoice & payment state
+  // Detail / Invoice
+  const [detailCard, setDetailCard] = useState<CreditCard | null>(null)
   const [invoiceCard, setInvoiceCard] = useState<CreditCard | null>(null)
-  const [showPaymentModal, setShowPaymentModal] = useState(false)
-  const [paymentDone, setPaymentDone] = useState(false)
+  const [showPayModal, setShowPayModal] = useState(false)
   const [isPaying, setIsPaying] = useState(false)
+  const [payDone, setPayDone] = useState(false)
 
-  // Transaction detail is handled inside InvoiceView
-
-  const haptic = () => {
-    if (Platform.OS !== 'web') Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light)
-  }
-
-  const openContract = useCallback((brand: CreditCardBrand) => {
+  const openContract = useCallback((p: CardProduct) => {
     haptic()
-    setSelectedBrand(brand)
-    setRequestedLimit(5000)
-    setShowContractModal(true)
-  }, [])
+    const maxForCustomer = Math.min(p.customerMaxLimit, availableCredit)
+    if (maxForCustomer < p.minLimit) {
+      Alert.alert('Limite insuficiente',
+        `Você precisa de pelo menos ${formatCurrency(p.minLimit)} de limite disponível para contratar este cartão.\n\nSeu limite disponível atual é ${formatCurrency(availableCredit)}.`)
+      return
+    }
+    setContractProduct(p)
+    setReqLimit(Math.min(maxForCustomer, Math.max(p.minLimit, 5000)))
+    setDueDay(10)
+  }, [availableCredit])
 
   const handleContract = useCallback(async () => {
+    if (!contractProduct || !customerId) return
     haptic()
     try {
       await requestCard.mutateAsync({
-        customerId: customerId ?? '',
-        preferredBrand: selectedBrand,
-        requestedLimit,
+        customerId,
+        productId: contractProduct.productId,
+        requestedLimit: reqLimit,
+        dueDay,
       })
-      setShowContractModal(false)
+      setContractProduct(null)
+      setSuccessInfo({ name: contractProduct.name, limit: reqLimit, dueDay })
       setShowSuccess(true)
+      queryClient.invalidateQueries({ queryKey: creditCardKeys.all })
+      queryClient.invalidateQueries({ queryKey: accountKeys.all })
     } catch (err) {
-      Alert.alert(
-        'Erro ao contratar',
-        err instanceof AppError ? err.message : 'Não foi possível contratar o cartão. Tente novamente.',
-      )
+      const msg = err instanceof AppError ? err.message : 'Não foi possível contratar. Verifique seu limite de crédito.'
+      Alert.alert('Erro', msg)
     }
-  }, [customerId, selectedBrand, requestedLimit, requestCard])
+  }, [customerId, contractProduct, reqLimit, dueDay, requestCard, queryClient])
 
-  const handlePayInvoice = useCallback(async () => {
-    if (!invoiceCard || invoiceCard.usedLimit <= 0) return
+  const handlePay = useCallback(async () => {
+    if (!invoiceCard || !customerId || invoiceCard.usedLimit <= 0) return
     haptic()
     setIsPaying(true)
     try {
-      await httpClient.post(
-        `/v1/customers/${customerId}/credit-cards/${invoiceCard.id}/invoice/pay`,
-        { amount: invoiceCard.usedLimit, paymentType: 'total' },
-      )
+      await creditCardService.payInvoice(customerId, invoiceCard.id, invoiceCard.usedLimit)
       queryClient.invalidateQueries({ queryKey: transactionKeys.all })
       queryClient.invalidateQueries({ queryKey: creditCardKeys.all })
-      setPaymentDone(true)
-      setTimeout(() => {
-        setShowPaymentModal(false)
-        setPaymentDone(false)
-        setIsPaying(false)
-        setInvoiceCard(null)
-      }, 2500)
+      queryClient.invalidateQueries({ queryKey: accountKeys.all })
+      setPayDone(true)
+      setTimeout(() => { setShowPayModal(false); setPayDone(false); setIsPaying(false); setInvoiceCard(null) }, 2200)
     } catch (err) {
       Alert.alert('Erro', err instanceof AppError ? err.message : 'Erro ao pagar fatura.')
       setIsPaying(false)
     }
   }, [invoiceCard, customerId, queryClient])
 
-  const handleCancelCard = useCallback((card: CreditCard) => {
-    Alert.alert(
-      'Cancelar cartão',
-      `Tem certeza que deseja cancelar o cartão •••• ${card.lastFourDigits} (${card.brand.toUpperCase()})?\n\nEsta ação não pode ser desfeita.`,
-      [
-        { text: 'Não', style: 'cancel' },
-        {
-          text: 'Cancelar cartão',
-          style: 'destructive',
-          onPress: async () => {
-            haptic()
-            try {
-              await cancelCard.mutateAsync({ cardId: card.id, customerId: customerId ?? '' })
-              Alert.alert('Cartão cancelado', `O cartão •••• ${card.lastFourDigits} foi cancelado.`)
-            } catch {
-              Alert.alert('Erro', 'Não foi possível cancelar o cartão.')
-            }
-          },
+  const handleCancel = useCallback((card: CreditCard) => {
+    Alert.alert('Cancelar cartão', `Cancelar cartão •••• ${card.lastFourDigits}?\nEsta ação não pode ser desfeita.`, [
+      { text: 'Não', style: 'cancel' },
+      {
+        text: 'Confirmar', style: 'destructive', onPress: async () => {
+          haptic()
+          try {
+            await cancelCard.mutateAsync({ cardId: card.id, customerId: customerId ?? '' })
+            setDetailCard(null)
+          } catch { Alert.alert('Erro', 'Não foi possível cancelar.') }
         },
-      ],
-    )
+      },
+    ])
   }, [customerId, cancelCard])
 
-  // Carousel scroll handler
-  const onCarouselScroll = useCallback((e: { nativeEvent: { contentOffset: { x: number } } }) => {
-    const idx = Math.round(e.nativeEvent.contentOffset.x / (CARD_WIDTH + CARD_SPACING))
-    if (idx >= 0 && idx < activeCards.length && idx !== selectedIndex) {
-      setSelectedIndex(idx)
-      haptic()
-    }
-  }, [activeCards.length, selectedIndex])
-
-  // ─── Success result ──────────────────────────────────────────────────
-  if (showSuccess) {
+  // ─── Success ──────────────────────────────────────────────────────
+  if (showSuccess && successInfo) {
     return (
       <SuccessSheet
         title="Cartão aprovado!"
-        message={requestCard.data?.message ?? 'Seu cartão foi contratado com sucesso!'}
+        message={`Seu ${successInfo.name} PJ já está disponível.`}
         details={[
-          { label: 'Status', value: 'Ativo' },
-          { label: 'Bandeira', value: selectedBrand.toUpperCase() },
-          { label: 'Limite', value: formatCurrency(requestedLimit) },
-          { label: 'Vencimento', value: `Dia ${selectedDueDay}` },
+          { label: 'Limite', value: formatCurrency(successInfo.limit) },
+          { label: 'Vencimento', value: `Dia ${successInfo.dueDay}` },
         ]}
-        onDone={() => {
-          setShowSuccess(false)
-          setTab('cards')
-        }}
+        onDone={() => { setShowSuccess(false); setSuccessInfo(null); setTab('cards') }}
       />
     )
   }
 
-  // ─── Main render ─────────────────────────────────────────────────────
+  // ─── Render ───────────────────────────────────────────────────────
   return (
-    <SafeAreaView style={styles.safe} edges={['bottom']}>
-      {/* Tab header */}
-      <View style={styles.tabRow}>
-        <TouchableOpacity
-          style={[styles.tabBtn, tab === 'cards' && styles.tabBtnActive]}
-          onPress={() => setTab('cards')}
-        >
-          <Text style={[styles.tabText, tab === 'cards' && styles.tabTextActive]}>Meus Cartões</Text>
-        </TouchableOpacity>
-        <TouchableOpacity
-          style={[styles.tabBtn, tab === 'offers' && styles.tabBtnActive]}
-          onPress={() => setTab('offers')}
-        >
-          <Text style={[styles.tabText, tab === 'offers' && styles.tabTextActive]}>Disponíveis</Text>
-        </TouchableOpacity>
+    <SafeAreaView style={s.safe} edges={['bottom']}>
+      {/* Tabs */}
+      <View style={s.tabBar}>
+        {(['cards', 'catalog'] as const).map((t) => (
+          <TouchableOpacity
+            key={t} style={[s.tab, tab === t && s.tabActive]}
+            onPress={() => { haptic(); setTab(t) }}
+          >
+            <Text style={[s.tabLabel, tab === t && s.tabLabelActive]}>
+              {t === 'cards' ? 'Meus Cartões' : 'Contratar'}
+            </Text>
+          </TouchableOpacity>
+        ))}
       </View>
 
-      <ScrollView style={styles.scroll} contentContainerStyle={styles.content}>
-        {/* ─── My Cards tab ───────────────────────────────────────── */}
+      <ScrollView
+        style={s.scroll}
+        contentContainerStyle={s.body}
+        showsVerticalScrollIndicator={false}
+        refreshControl={
+          <RefreshControl
+            refreshing={refreshing}
+            onRefresh={handleRefresh}
+            tintColor={colors.itauOrange}
+            colors={[colors.itauOrange]}
+          />
+        }
+      >
+        {/* ── Credit Limit Banner ────────────────────────────── */}
+        {totalCreditLimit != null && totalCreditLimit > 0 && (
+          <View style={s.limitBanner}>
+            <View style={s.limitRow}>
+              <View>
+                <Text style={s.limitLabel}>Limite total aprovado</Text>
+                <Text style={s.limitValue}>{formatCurrency(totalCreditLimit)}</Text>
+              </View>
+              <View style={{ alignItems: 'flex-end' }}>
+                <Text style={s.limitLabel}>Disponível</Text>
+                <Text style={[s.limitValue, { color: availableCredit > 0 ? colors.success : colors.error }]}>
+                  {formatCurrency(availableCredit)}
+                </Text>
+              </View>
+            </View>
+            <View style={s.limitBarBg}>
+              <View style={[s.limitBarFill, { width: `${totalCreditLimit > 0 ? Math.min((usedCreditLimit / totalCreditLimit) * 100, 100) : 0}%` }]} />
+            </View>
+            <Text style={s.limitHint}>
+              {usedCreditLimit > 0 ? `${formatCurrency(usedCreditLimit)} alocado em ${activeCards.length} cartão(ões)` : 'Nenhum cartão contratado'}
+            </Text>
+          </View>
+        )}
+
+        {/* ── MY CARDS ───────────────────────────────────────── */}
         {tab === 'cards' && (
           <>
-            {hasCards ? (
-              <>
-                {/* ─── Carousel ────────────────────────────────── */}
-                <FlatList
-                  data={activeCards}
-                  keyExtractor={(c) => c.id}
-                  horizontal
-                  pagingEnabled={false}
-                  snapToInterval={CARD_WIDTH + CARD_SPACING}
-                  snapToAlignment="center"
-                  decelerationRate="fast"
-                  showsHorizontalScrollIndicator={false}
-                  contentContainerStyle={styles.carouselContent}
-                  onMomentumScrollEnd={onCarouselScroll}
-                  renderItem={({ item, index }) => (
-                    <CorporateCardVisual
-                      card={item}
-                      isActive={index === selectedIndex}
-                    />
-                  )}
-                />
-
-                {/* Dot indicators */}
-                {activeCards.length > 1 && (
-                  <View style={styles.dotRow}>
-                    {activeCards.map((_, i) => (
-                      <View
-                        key={i}
-                        style={[styles.dot, i === selectedIndex && styles.dotActive]}
-                      />
-                    ))}
-                  </View>
-                )}
-
-                {/* ─── Detail Panel ──────────────────────────── */}
-                {selectedCard && (
-                  <CardDetailPanel
-                    card={selectedCard}
-                    onViewInvoice={() => { haptic(); setInvoiceCard(selectedCard) }}
-                    onCancel={() => { haptic(); handleCancelCard(selectedCard) }}
+            {isLoading ? (
+              <View style={s.center}>
+                <ActivityIndicator size="large" color={colors.itauOrange} />
+              </View>
+            ) : activeCards.length > 0 ? (
+              <View style={s.cardList}>
+                {activeCards.map((card) => (
+                  <CardRow
+                    key={card.id}
+                    card={card}
+                    onPress={() => { haptic(); setDetailCard(card) }}
                   />
-                )}
-              </>
+                ))}
+              </View>
             ) : (
-              /* ─── Empty state with big CTA ──────────────────────── */
-              <View style={styles.emptyState}>
-                <View style={styles.emptyIcon}>
-                  <Ionicons name="card-outline" size={48} color={colors.itauOrange} />
-                </View>
-                <Text style={styles.emptyTitle}>Nenhum cartão PJ</Text>
-                <Text style={styles.emptySubtext}>
-                  Contrate seu primeiro cartão de crédito empresarial e aproveite benefícios exclusivos.
-                </Text>
-
-                <TouchableOpacity
-                  style={styles.ctaButton}
-                  onPress={() => { haptic(); setTab('offers') }}
-                  activeOpacity={0.8}
-                >
-                  <Ionicons name="add-circle" size={22} color={colors.textInverse} />
-                  <Text style={styles.ctaText}>Contratar novo cartão</Text>
+              <View style={s.empty}>
+                <Ionicons name="card-outline" size={40} color={colors.textMuted} />
+                <Text style={s.emptyTitle}>Nenhum cartão PJ</Text>
+                <Text style={s.emptyDesc}>Contrate seu primeiro cartão corporativo.</Text>
+                <TouchableOpacity style={s.emptyBtn} onPress={() => { haptic(); setTab('catalog') }} activeOpacity={0.8}>
+                  <Text style={s.emptyBtnText}>Ver cartões disponíveis</Text>
                 </TouchableOpacity>
               </View>
             )}
           </>
         )}
 
-        {/* ─── Offers tab ─────────────────────────────────────────── */}
-        {tab === 'offers' && (
+        {/* ── CATALOG ────────────────────────────────────────── */}
+        {tab === 'catalog' && (
           <>
-            <Text style={styles.offersTitle}>Contratar novo cartão</Text>
-            <Text style={styles.offersSubtitle}>
-              Escolha a bandeira do seu novo cartão corporativo PJ.
-            </Text>
-
-            {/* Brand card previews */}
-            {(['visa', 'mastercard', 'elo', 'amex'] as CreditCardBrand[]).map((brand) => {
-              const theme = BRAND_THEMES[brand]
-              const isSelected = selectedBrand === brand
+            <Text style={s.sectionTitle}>Cartões disponíveis</Text>
+            {isLoadingLimit ? (
+              <View style={{ alignItems: 'center', paddingVertical: spacing['2xl'] }}>
+                <ActivityIndicator size="small" color={colors.itauOrange} />
+                <Text style={{ color: colors.textMuted, fontSize: fontSize.sm, marginTop: spacing.sm }}>Carregando limite...</Text>
+              </View>
+            ) : isLoadingAvailable ? (
+              <View style={{ alignItems: 'center', paddingVertical: spacing['2xl'] }}>
+                <ActivityIndicator size="small" color={colors.itauOrange} />
+                <Text style={{ color: colors.textMuted, fontSize: fontSize.sm, marginTop: spacing.sm }}>Carregando catálogo...</Text>
+              </View>
+            ) : catalogProducts.map((p) => {
+              const maxForCustomer = Math.min(p.customerMaxLimit, availableCredit)
+              const disabled = totalCreditLimit != null && totalCreditLimit > 0 ? maxForCustomer < p.minLimit : false
               return (
-                <TouchableOpacity
-                  key={brand}
-                  activeOpacity={0.85}
-                  onPress={() => { setSelectedBrand(brand); haptic() }}
-                  style={[styles.offerCardWrap, isSelected && styles.offerCardWrapActive]}
-                >
-                  <LinearGradient
-                    colors={theme.gradient as [string, string, string]}
-                    start={{ x: 0, y: 0 }}
-                    end={{ x: 1, y: 1 }}
-                    style={styles.offerCardFace}
-                  >
-                    {/* Deco */}
-                    <View style={[styles.cardDeco1, { backgroundColor: `${theme.accent}15` }]} />
-                    <View style={[styles.cardDeco2, { backgroundColor: `${theme.accent}10` }]} />
-
-                    {/* Top row */}
-                    <View style={styles.cardTopRow}>
-                      <View style={styles.corporateTag}>
-                        <Text style={[styles.corporateTagText, { color: theme.accent }]}>CORPORATE</Text>
-                      </View>
-                      <Text style={[styles.brandLogo, { color: theme.textColor }]}>{theme.logoText}</Text>
-                    </View>
-
-                    {/* Chip + contactless */}
-                    <View style={styles.chipRow}>
-                      <View style={[styles.chipEl, { backgroundColor: theme.chipColor }]}>
-                        <View style={styles.chipLines}>
-                          <View style={[styles.chipLine, { backgroundColor: `${theme.chipColor === '#D0D0D0' ? '#999' : '#A0A0A0'}` }]} />
-                          <View style={[styles.chipLine, { backgroundColor: `${theme.chipColor === '#D0D0D0' ? '#999' : '#A0A0A0'}` }]} />
-                          <View style={[styles.chipLine, { backgroundColor: `${theme.chipColor === '#D0D0D0' ? '#999' : '#A0A0A0'}` }]} />
-                        </View>
-                      </View>
-                      <Ionicons name="wifi-outline" size={16} color={theme.textSecondary} style={{ transform: [{ rotate: '90deg' }] }} />
-                    </View>
-
-                    {/* Card number placeholder */}
-                    <Text style={[styles.cardNumberText, { color: theme.textColor, fontSize: fontSize.sm }]}>
-                      •••• •••• •••• ••••
-                    </Text>
-
-                    {/* Bottom */}
-                    <View style={styles.cardBottomRow}>
-                      <View style={{ flex: 1 }}>
-                        <Text style={[styles.holderLabel, { color: theme.textSecondary }]}>CARTÃO CORPORATIVO</Text>
-                        <Text style={[styles.holderName, { color: theme.textColor }]}>{theme.label.replace('Cartão Corporativo ', '')}</Text>
-                      </View>
-                      <View style={styles.bankLogo}>
-                        <Text style={[styles.bankLogoText, { color: theme.accent }]}>itaú</Text>
-                        <Text style={[styles.bankPJ, { color: theme.textSecondary }]}>PJ</Text>
-                      </View>
-                    </View>
-
-                    {/* Accent stripe */}
-                    <View style={[styles.accentStripe, { backgroundColor: theme.accent }]} />
-                  </LinearGradient>
-
-                  {/* Selected indicator */}
-                  {isSelected && (
-                    <View style={styles.offerSelectedBadge}>
-                      <Ionicons name="checkmark-circle" size={22} color={colors.itauOrange} />
-                      <Text style={styles.offerSelectedText}>Selecionado</Text>
-                    </View>
-                  )}
-                </TouchableOpacity>
+                <CatalogCard
+                  key={p.productId}
+                  product={p}
+                  disabled={disabled}
+                  availableCredit={availableCredit}
+                  onContract={() => openContract(p)}
+                />
               )
             })}
-
-            <ActionButton
-              title={`Solicitar ${BRAND_THEMES[selectedBrand].logoText}`}
-              onPress={() => openContract(selectedBrand)}
-            />
           </>
         )}
       </ScrollView>
 
-      {/* ─── Invoice View ───────────────────────────────────────────── */}
+      {/* ── Card Detail Sheet ────────────────────────────────── */}
+      <BottomSheet visible={!!detailCard} onClose={() => setDetailCard(null)}>
+        {detailCard && (
+          <CardDetail
+            card={detailCard}
+            onInvoice={() => { setInvoiceCard(detailCard); setDetailCard(null) }}
+            onCancel={() => handleCancel(detailCard)}
+          />
+        )}
+      </BottomSheet>
+
+      {/* ── Contract Sheet ───────────────────────────────────── */}
+      <BottomSheet visible={!!contractProduct} onClose={() => setContractProduct(null)}>
+        {contractProduct && (
+          <ContractSheet
+            product={contractProduct}
+            availableCredit={availableCredit}
+            limit={reqLimit}
+            onLimitChange={setReqLimit}
+            dueDay={dueDay}
+            onDueDayChange={setDueDay}
+            loading={requestCard.isPending}
+            onConfirm={handleContract}
+            onCancel={() => setContractProduct(null)}
+          />
+        )}
+      </BottomSheet>
+
+      {/* ── Invoice View ─────────────────────────────────────── */}
       {invoiceCard && (
-        <InvoiceView
+        <InvoiceScreen
           card={invoiceCard}
+          customerId={customerId}
           onClose={() => setInvoiceCard(null)}
-          onPayPress={() => setShowPaymentModal(true)}
+          onPay={() => setShowPayModal(true)}
         />
       )}
 
-      {/* ─── Contract Modal (slider + due day) ──────────────────────── */}
-      <Modal visible={showContractModal} animationType="slide" transparent onRequestClose={() => setShowContractModal(false)}>
-        <TouchableOpacity
-          style={styles.modalOverlay}
-          activeOpacity={1}
-          onPress={() => setShowContractModal(false)}
-        >
-          <TouchableOpacity activeOpacity={1} style={{ width: '100%' }}>
-          <ScrollView contentContainerStyle={styles.contractScroll}>
-            <View style={styles.modalSheet}>
-              <View style={styles.sheetHandle} />
-              <Text style={styles.modalTitle}>Contratar cartão {selectedBrand.toUpperCase()}</Text>
-
-              {/* Limite — backend valida os limites mín/máx permitidos */}
-              <Text style={styles.fieldLabel}>Limite desejado</Text>
-              <Text style={styles.sliderValue}>{formatCurrency(requestedLimit)}</Text>
-
-              <Slider
-                style={{ width: '100%', height: 40 }}
-                minimumValue={1000}
-                maximumValue={50000}
-                step={100}
-                value={requestedLimit}
-                onValueChange={(v) => setRequestedLimit(Math.round(v / 100) * 100)}
-                minimumTrackTintColor={colors.itauOrange}
-                maximumTrackTintColor={colors.bgInput}
-                thumbTintColor={colors.itauOrange}
-              />
-              <View style={styles.sliderLabels}>
-                <Text style={styles.sliderMinMax}>{formatCurrency(1000)}</Text>
-                <Text style={styles.sliderMinMax}>{formatCurrency(50000)}</Text>
-              </View>
-
-              <Text style={styles.fieldLabel}>Dia do vencimento da fatura</Text>
-              <View style={styles.dueDayRow}>
-                {[1, 5, 10, 15, 20, 25].map((d) => (
-                  <TouchableOpacity
-                    key={d}
-                    style={[styles.dueDayChip, selectedDueDay === d && styles.dueDayChipActive]}
-                    onPress={() => setSelectedDueDay(d)}
-                  >
-                    <Text style={[styles.dueDayText, selectedDueDay === d && styles.dueDayTextActive]}>{d}</Text>
-                  </TouchableOpacity>
-                ))}
-              </View>
-
-              <View style={styles.summaryCard}>
-                <SummaryLine label="Bandeira" value={selectedBrand.toUpperCase()} />
-                <SummaryLine label="Limite" value={formatCurrency(requestedLimit)} />
-                <SummaryLine label="Vencimento" value={`Dia ${selectedDueDay}`} />
-              </View>
-
-              <View style={styles.btnRow}>
-                <ActionButton title="Cancelar" onPress={() => setShowContractModal(false)} variant="secondary" />
-                <ActionButton title="Contratar" onPress={handleContract} loading={requestCard.isPending} />
-              </View>
+      {/* ── Pay Modal ────────────────────────────────────────── */}
+      <BottomSheet visible={showPayModal} onClose={() => { if (!isPaying) { setShowPayModal(false); setIsPaying(false) } }}>
+        {payDone ? (
+          <View style={s.center}>
+            <View style={s.checkCircle}><Ionicons name="checkmark" size={28} color="#FFF" /></View>
+            <Text style={s.payDoneTitle}>Fatura paga!</Text>
+            <Text style={s.payDoneSub}>{invoiceCard ? formatCurrency(invoiceCard.usedLimit) : ''} debitado do saldo</Text>
+          </View>
+        ) : (
+          <View style={{ gap: spacing.xl }}>
+            <Text style={s.sheetTitle}>Pagar fatura</Text>
+            <Text style={s.sheetSub}>Cartão •••• {invoiceCard?.lastFourDigits}</Text>
+            <View style={s.payBox}>
+              <Text style={s.payBoxLabel}>Valor total</Text>
+              <Text style={s.payBoxValue}>{invoiceCard ? formatCurrency(invoiceCard.usedLimit) : ''}</Text>
             </View>
-          </ScrollView>
-          </TouchableOpacity>
-        </TouchableOpacity>
-      </Modal>
-
-      {/* ─── Payment Modal ──────────────────────────────────────────── */}
-      <Modal visible={showPaymentModal} animationType="fade" transparent onRequestClose={() => { setShowPaymentModal(false); setIsPaying(false) }}>
-        <TouchableOpacity
-          style={styles.modalOverlay}
-          activeOpacity={1}
-          onPress={() => { if (!isPaying && !paymentDone) { setShowPaymentModal(false); setIsPaying(false) } }}
-        >
-          <TouchableOpacity activeOpacity={1} style={[styles.modalSheet, { maxHeight: 480 }]}>
-            <View style={styles.sheetHandle} />
-            {paymentDone ? (
-              <View style={styles.paymentDone}>
-                <View style={styles.paymentCheck}>
-                  <Ionicons name="checkmark" size={32} color={colors.textInverse} />
-                </View>
-                <Text style={styles.paymentDoneTitle}>Fatura paga!</Text>
-                <Text style={styles.paymentDoneSub}>
-                  O valor de {invoiceCard ? formatCurrency(invoiceCard.usedLimit) : ''} foi debitado do seu saldo.
-                </Text>
-                <View style={styles.receiptCard}>
-                  <SummaryLine label="Cartão" value={`•••• ${invoiceCard?.lastFourDigits ?? ''}`} />
-                  <SummaryLine label="Valor pago" value={invoiceCard ? formatCurrency(invoiceCard.usedLimit) : ''} />
-                  <SummaryLine label="Data" value={new Date().toLocaleDateString('pt-BR')} />
-                  <SummaryLine
-                    label="Hora"
-                    value={new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}
-                  />
-                </View>
-              </View>
-            ) : (
-              <>
-                <Text style={styles.modalTitle}>Pagar fatura</Text>
-                <Text style={styles.paymentSub}>Cartão •••• {invoiceCard?.lastFourDigits}</Text>
-                <View style={styles.paymentBox}>
-                  <Text style={styles.paymentLabel}>Valor total pendente</Text>
-                  <Text style={styles.paymentValue}>
-                    {invoiceCard ? formatCurrency(invoiceCard.usedLimit) : ''}
-                  </Text>
-                  <Text style={styles.paymentNote}>Será debitado do seu saldo em conta</Text>
-                </View>
-                <View style={styles.btnRow}>
-                  <ActionButton
-                    title="Cancelar"
-                    onPress={() => { setShowPaymentModal(false); setIsPaying(false) }}
-                    variant="secondary"
-                  />
-                  <ActionButton title="Pagar fatura" onPress={handlePayInvoice} loading={isPaying} />
-                </View>
-              </>
-            )}
-          </TouchableOpacity>
-        </TouchableOpacity>
-      </Modal>
+            <View style={s.btnRow}>
+              <ActionButton title="Cancelar" variant="secondary" onPress={() => { setShowPayModal(false); setIsPaying(false) }} />
+              <ActionButton title="Pagar" onPress={handlePay} loading={isPaying} />
+            </View>
+          </View>
+        )}
+      </BottomSheet>
     </SafeAreaView>
   )
 }
 
-// ─── Invoice Sub-view ────────────────────────────────────────────────
-function InvoiceView({
-  card,
-  onClose,
-  onPayPress,
-}: {
-  card: CreditCard
-  onClose: () => void
-  onPayPress: () => void
+// ─── Card Row (list item for "Meus Cartões") ────────────────────────
+
+function CardRow({ card, onPress }: { card: CreditCard; onPress: () => void }) {
+  const usagePct = card.limit > 0 ? (card.usedLimit / card.limit) * 100 : 0
+  const barColor = usagePct > 80 ? colors.error : usagePct > 50 ? colors.warning : colors.itauOrange
+
+  return (
+    <TouchableOpacity style={s.cardRow} onPress={onPress} activeOpacity={0.7}>
+      {/* Card visual */}
+      <View style={[s.miniChip, { backgroundColor: card.isVirtual ? colors.itauBlue : colors.itauNavy }]}>
+        <Text style={s.miniChipLabel}>itaú <Text style={{ fontWeight: fontWeight.regular }}>PJ</Text></Text>
+        <Text style={s.miniChipDigits}>•••• {card.lastFourDigits}</Text>
+        <Text style={s.miniChipBrand}>{brandLabel(card.brand)}</Text>
+      </View>
+
+      {/* Info */}
+      <View style={s.cardRowInfo}>
+        <View style={s.cardRowTop}>
+          <Text style={s.cardRowName} numberOfLines={1}>{card.holderName || 'Cartão PJ'}</Text>
+          <StatusBadge
+            label={card.status === 'active' ? 'Ativo' : card.status === 'blocked' ? 'Bloq.' : card.status}
+            variant={card.status === 'active' ? 'success' : 'warning'}
+          />
+        </View>
+
+        <View style={s.cardRowLimits}>
+          <View>
+            <Text style={s.cardRowLimitLabel}>Utilizado</Text>
+            <Text style={s.cardRowLimitValue}>{formatCurrency(card.usedLimit)}</Text>
+          </View>
+          <View style={{ alignItems: 'center' }}>
+            <Text style={s.cardRowLimitLabel}>Limite</Text>
+            <Text style={s.cardRowLimitValue}>{formatCurrency(card.limit)}</Text>
+          </View>
+          <View style={{ alignItems: 'flex-end' }}>
+            <Text style={s.cardRowLimitLabel}>Disponível</Text>
+            <Text style={[s.cardRowLimitValue, { color: colors.success }]}>{formatCurrency(card.availableLimit)}</Text>
+          </View>
+        </View>
+
+        <View style={s.cardRowBarBg}>
+          <View style={[s.cardRowBarFill, { width: `${Math.min(usagePct, 100)}%`, backgroundColor: barColor }]} />
+        </View>
+      </View>
+    </TouchableOpacity>
+  )
+}
+
+// ─── Card Detail (bottom sheet content) ──────────────────────────────
+
+function CardDetail({ card, onInvoice, onCancel }: {
+  card: CreditCard; onInvoice: () => void; onCancel: () => void
+}) {
+  const usagePct = card.limit > 0 ? (card.usedLimit / card.limit) * 100 : 0
+
+  return (
+    <View style={{ gap: spacing.xl }}>
+      {/* Header */}
+      <View style={s.detailHeader}>
+        <View style={[s.detailChip, { backgroundColor: card.isVirtual ? colors.itauBlue : colors.itauNavy }]}>
+          <Text style={s.detailChipLine1}>itaú <Text style={{ fontWeight: fontWeight.regular }}>PJ</Text></Text>
+          <Text style={s.detailChipDigits}>•••• {card.lastFourDigits}</Text>
+          <Text style={s.detailChipBrand}>{brandLabel(card.brand)}</Text>
+        </View>
+        <View style={{ flex: 1, gap: 4 }}>
+          <Text style={s.detailName}>{card.holderName || 'Cartão PJ'}</Text>
+          <Text style={s.detailSub}>{card.cardType || 'Corporate'} · {brandLabel(card.brand)}</Text>
+          <StatusBadge
+            label={card.status === 'active' ? 'Ativo' : card.status}
+            variant={card.status === 'active' ? 'success' : 'warning'}
+          />
+        </View>
+      </View>
+
+      {/* Limits */}
+      <View style={s.detailLimits}>
+        <Row label="Limite total" value={formatCurrency(card.limit)} />
+        <Row label="Utilizado" value={formatCurrency(card.usedLimit)} valueColor={card.usedLimit > 0 ? colors.itauOrange : undefined} />
+        <Row label="Disponível" value={formatCurrency(card.availableLimit)} valueColor={colors.success} />
+        <View style={s.miniBarBg}>
+          <View style={[s.miniBarFill, { width: `${Math.min(usagePct, 100)}%` }]} />
+        </View>
+      </View>
+
+      {/* Info */}
+      <View style={s.detailInfo}>
+        <Row label="Vencimento" value={`Dia ${card.dueDay}`} />
+        <Row label="Fechamento" value={`Dia ${card.closingDay}`} />
+        <Row label="Anuidade" value={card.annualFee === 0 ? 'Isento' : formatCurrency(card.annualFee)} />
+        <Row label="Virtual" value={card.isVirtual ? 'Sim' : 'Não'} />
+        <Row label="Criado em" value={new Date(card.createdAt).toLocaleDateString('pt-BR')} />
+      </View>
+
+      {/* Actions */}
+      <View style={s.detailActions}>
+        <TouchableOpacity style={s.detailAction} onPress={onInvoice} activeOpacity={0.7}>
+          <Ionicons name="receipt-outline" size={20} color={colors.itauOrange} />
+          <Text style={s.detailActionLabel}>Ver fatura</Text>
+        </TouchableOpacity>
+        <TouchableOpacity style={[s.detailAction, { borderColor: colors.error }]} onPress={onCancel} activeOpacity={0.7}>
+          <Ionicons name="close-circle-outline" size={20} color={colors.error} />
+          <Text style={[s.detailActionLabel, { color: colors.error }]}>Cancelar</Text>
+        </TouchableOpacity>
+      </View>
+    </View>
+  )
+}
+
+// ─── Catalog Card ────────────────────────────────────────────────────
+
+function CatalogCard({ product, disabled, availableCredit, onContract }: {
+  product: CardProduct; disabled: boolean; availableCredit: number; onContract: () => void
+}) {
+  const [expanded, setExpanded] = useState(false)
+  const maxForCustomer = Math.min(product.customerMaxLimit, availableCredit)
+
+  return (
+    <View style={[s.catalogCard, disabled && { opacity: 0.5 }]}>
+      {/* Mini visual */}
+      <View style={[s.catalogVisual, { backgroundColor: product.gradient[0] }]}>
+        <Text style={[s.catalogVisualName, { color: product.textColor }]}>itaú PJ {product.name}</Text>
+        <Text style={[s.catalogVisualBrand, { color: product.textSecondary }]}>{brandLabel(product.brand)}</Text>
+        {product.isVirtual && (
+          <View style={s.virtualTag}>
+            <Ionicons name="phone-portrait-outline" size={10} color="#FFF" />
+            <Text style={s.virtualTagText}>Virtual</Text>
+          </View>
+        )}
+      </View>
+
+      {/* Info */}
+      <View style={s.catalogInfo}>
+        <Text style={s.catalogName}>{product.name}</Text>
+        <Text style={s.catalogDesc}>{product.description}</Text>
+
+        <View style={s.catalogMeta}>
+          <MetaItem label="Limite até" value={formatCurrency(disabled ? 0 : maxForCustomer)} />
+          <MetaItem label="Anuidade" value={product.annualFee === 0 ? 'Grátis' : `${formatCurrency(product.annualFee)}/mês`} highlight={product.annualFee === 0} />
+          <MetaItem label="Bandeira" value={brandLabel(product.brand)} />
+        </View>
+
+        {/* Benefits toggle */}
+        <TouchableOpacity style={s.benefitsBtn} onPress={() => setExpanded(!expanded)} activeOpacity={0.7}>
+          <Text style={s.benefitsBtnText}>{expanded ? 'Ocultar' : 'Benefícios'}</Text>
+          <Ionicons name={expanded ? 'chevron-up' : 'chevron-down'} size={14} color={colors.itauOrange} />
+        </TouchableOpacity>
+
+        {expanded && (
+          <View style={s.benefitsList}>
+            {product.benefits.map((b: string, i: number) => (
+              <View key={i} style={s.benefitItem}>
+                <Ionicons name="checkmark" size={14} color={colors.success} />
+                <Text style={s.benefitText}>{b}</Text>
+              </View>
+            ))}
+          </View>
+        )}
+
+        {disabled ? (
+          <View style={s.disabledMsg}>
+            <Ionicons name="alert-circle-outline" size={14} color={colors.error} />
+            <Text style={s.disabledMsgText}>Limite insuficiente ({formatCurrency(availableCredit)} disp.)</Text>
+          </View>
+        ) : (
+          <TouchableOpacity style={s.contractBtn} onPress={onContract} activeOpacity={0.8}>
+            <Text style={s.contractBtnText}>Contratar</Text>
+          </TouchableOpacity>
+        )}
+      </View>
+    </View>
+  )
+}
+
+// ─── Contract Sheet ──────────────────────────────────────────────────
+
+function ContractSheet({ product, availableCredit, limit, onLimitChange, dueDay, onDueDayChange, loading, onConfirm, onCancel }: {
+  product: CardProduct; availableCredit: number; limit: number; onLimitChange: (v: number) => void
+  dueDay: number; onDueDayChange: (d: number) => void; loading: boolean
+  onConfirm: () => void; onCancel: () => void
+}) {
+  const maxForCustomer = Math.min(product.customerMaxLimit, availableCredit)
+
+  return (
+    <View style={{ gap: spacing.lg }}>
+      <Text style={s.sheetTitle}>Contratar {product.name}</Text>
+
+      {/* Limit info */}
+      <View style={s.creditInfo}>
+        <Ionicons name="information-circle-outline" size={16} color={colors.itauBlue} />
+        <Text style={s.creditInfoText}>
+          Limite disponível: <Text style={{ fontWeight: fontWeight.bold, color: colors.success }}>{formatCurrency(availableCredit)}</Text>
+        </Text>
+      </View>
+
+      {/* Slider */}
+      <View>
+        <Text style={s.fieldLabel}>Limite do cartão</Text>
+        <Text style={s.sliderVal}>{formatCurrency(limit)}</Text>
+        <Slider
+          style={{ width: '100%', height: 36 }}
+          minimumValue={product.minLimit}
+          maximumValue={maxForCustomer}
+          step={100}
+          value={limit}
+          onValueChange={(v) => onLimitChange(Math.round(v / 100) * 100)}
+          minimumTrackTintColor={colors.itauOrange}
+          maximumTrackTintColor={colors.bgInput}
+          thumbTintColor={colors.itauOrange}
+        />
+        <View style={s.sliderLabels}>
+          <Text style={s.sliderMin}>{formatCurrency(product.minLimit)}</Text>
+          <Text style={s.sliderMin}>{formatCurrency(maxForCustomer)}</Text>
+        </View>
+      </View>
+
+      {/* Due day */}
+      <View>
+        <Text style={s.fieldLabel}>Vencimento</Text>
+        <View style={s.dueDayRow}>
+          {[1, 5, 10, 15, 20, 25].map((d) => (
+            <TouchableOpacity
+              key={d} style={[s.dueDayChip, dueDay === d && s.dueDayActive]}
+              onPress={() => { haptic(); onDueDayChange(d) }}
+            >
+              <Text style={[s.dueDayText, dueDay === d && s.dueDayTextActive]}>{d}</Text>
+            </TouchableOpacity>
+          ))}
+        </View>
+      </View>
+
+      {/* Summary */}
+      <View style={s.summary}>
+        <Row label="Produto" value={`${product.name} (${brandLabel(product.brand)})`} />
+        <Row label="Limite" value={formatCurrency(limit)} />
+        <Row label="Vencimento" value={`Dia ${dueDay}`} />
+        <Row label="Anuidade" value={product.annualFee === 0 ? 'Isento' : `${formatCurrency(product.annualFee)}/mês`} />
+        <Row label="Tipo" value={product.isVirtual ? 'Virtual' : 'Físico'} />
+      </View>
+
+      <View style={s.btnRow}>
+        <ActionButton title="Cancelar" variant="secondary" onPress={onCancel} />
+        <ActionButton title="Confirmar" onPress={onConfirm} loading={loading} />
+      </View>
+    </View>
+  )
+}
+
+// ─── Invoice Screen ──────────────────────────────────────────────────
+
+function InvoiceScreen({ card, customerId, onClose, onPay }: {
+  card: CreditCard; customerId: string | null; onClose: () => void; onPay: () => void
 }) {
   const month = new Date().toISOString().slice(0, 7)
-  const { data: invoice } = useCreditCardInvoice(card.id, month)
+  const { data: invoice } = useCreditCardInvoice(customerId, card.id, month)
   const [detailTx, setDetailTx] = useState<CreditCardTransaction | null>(null)
   const insets = useSafeAreaInsets()
-  const theme = BRAND_THEMES[card.brand] ?? BRAND_THEMES.visa
 
   return (
     <Modal visible animationType="slide" transparent={false} onRequestClose={onClose}>
-      <View style={[styles.invoiceSafe, { paddingTop: insets.top }]}>
-        <View style={styles.invoiceHeader}>
-          <TouchableOpacity
-            onPress={onClose}
-            style={styles.invoiceBackBtn}
-            hitSlop={{ top: 16, bottom: 16, left: 16, right: 16 }}
-            activeOpacity={0.6}
-          >
+      <View style={[s.invoiceSafe, { paddingTop: insets.top }]}>
+        {/* Header */}
+        <View style={s.invoiceHeader}>
+          <TouchableOpacity onPress={onClose} hitSlop={{ top: 16, bottom: 16, left: 16, right: 16 }}>
             <Ionicons name="arrow-back" size={22} color={colors.itauOrange} />
-            <Text style={styles.invoiceBackText}>Voltar</Text>
           </TouchableOpacity>
-          <Text style={styles.invoiceHTitle}>Fatura Atual</Text>
-          <View style={{ width: 80 }} />
+          <Text style={s.invoiceHTitle}>Fatura — •••• {card.lastFourDigits}</Text>
+          <View style={{ width: 22 }} />
         </View>
 
-        <ScrollView style={styles.scroll} contentContainerStyle={styles.content}>
-          {/* Summary */}
-          <View style={styles.invoiceSummary}>
-            <Text style={styles.invoiceSumLabel}>{theme.label} · •••• {card.lastFourDigits}</Text>
-            <Text style={styles.invoiceTotal}>
+        <ScrollView style={s.scroll} contentContainerStyle={s.body} showsVerticalScrollIndicator={false}>
+          {/* Total */}
+          <View style={s.invoiceTotal}>
+            <Text style={s.invoiceTotalLabel}>Total da fatura</Text>
+            <Text style={s.invoiceTotalVal}>
               {invoice ? formatCurrency(invoice.totalAmount) : formatCurrency(card.usedLimit)}
             </Text>
-            <Text style={styles.invoiceDue}>Vencimento: dia {card.dueDay}</Text>
+            <Text style={s.invoiceTotalDue}>Vencimento: dia {card.dueDay}</Text>
             <StatusBadge
-              label={card.usedLimit === 0 ? 'Sem pendências' : 'Pendente'}
+              label={card.usedLimit === 0 ? 'Em dia' : 'Pendente'}
               variant={card.usedLimit === 0 ? 'success' : 'warning'}
             />
           </View>
 
           {/* Transactions */}
           {invoice && invoice.transactions.length > 0 ? (
-            <View style={styles.invoiceTxList}>
-              <Text style={styles.invoiceTxTitle}>Compras do cartão</Text>
+            <View style={s.txSection}>
+              <Text style={s.txSectionTitle}>Lançamentos</Text>
               {invoice.transactions.map((tx, i) => (
-                <TouchableOpacity
-                  key={tx.id ?? i}
-                  style={styles.invoiceTxRow}
-                  onPress={() => setDetailTx(tx)}
-                  activeOpacity={0.6}
-                >
-                  <View style={styles.invoiceTxIcon}>
-                    <Ionicons name="cart-outline" size={16} color={colors.itauOrange} />
+                <TouchableOpacity key={tx.id ?? i} style={s.txRow} onPress={() => setDetailTx(tx)} activeOpacity={0.6}>
+                  <View style={s.txDot} />
+                  <View style={{ flex: 1 }}>
+                    <Text style={s.txDesc} numberOfLines={1}>{tx.description}</Text>
+                    <Text style={s.txMeta}>{tx.category} · {new Date(tx.date).toLocaleDateString('pt-BR')}</Text>
                   </View>
-                  <View style={styles.invoiceTxInfo}>
-                    <Text style={styles.invoiceTxDesc} numberOfLines={1}>{tx.description}</Text>
-                    <Text style={styles.invoiceTxMeta}>
-                      {tx.category}{tx.installment ? ` · ${tx.installment}` : ''} · {new Date(tx.date).toLocaleDateString('pt-BR')}
-                    </Text>
-                  </View>
-                  <View style={styles.invoiceTxRight}>
-                    <Text style={styles.invoiceTxAmount}>{formatCurrency(tx.amount)}</Text>
-                    <Ionicons name="chevron-forward" size={14} color={colors.textMuted} />
-                  </View>
+                  <Text style={s.txAmount}>{formatCurrency(tx.amount)}</Text>
                 </TouchableOpacity>
               ))}
             </View>
           ) : card.usedLimit > 0 ? (
-            <View style={styles.emptyInvoice}>
-              <Text style={styles.emptySubtext}>Total utilizado: {formatCurrency(card.usedLimit)}</Text>
+            <View style={s.empty}>
+              <Text style={s.emptyDesc}>Utilizado: {formatCurrency(card.usedLimit)}</Text>
             </View>
           ) : (
-            <View style={styles.emptyInvoice}>
-              <Ionicons name="checkmark-circle" size={36} color={colors.success} />
-              <Text style={styles.emptyTitle}>Tudo em dia!</Text>
-              <Text style={styles.emptySubtext}>Nenhuma compra pendente</Text>
+            <View style={s.empty}>
+              <Ionicons name="checkmark-circle" size={32} color={colors.success} />
+              <Text style={s.emptyTitle}>Tudo em dia</Text>
             </View>
           )}
 
-          {/* Pay button */}
-          {card.usedLimit > 0 && (
-            <ActionButton title="Pagar fatura" onPress={onPayPress} />
-          )}
-
-          {/* Extra bottom spacing for safe area */}
-          <View style={{ height: Platform.OS === 'ios' ? 34 : 16 }} />
+          {card.usedLimit > 0 && <ActionButton title="Pagar fatura" onPress={onPay} />}
         </ScrollView>
       </View>
 
-      {/* Transaction detail popup — inside the invoice modal so it renders on top */}
-      <Modal visible={!!detailTx} animationType="fade" transparent onRequestClose={() => setDetailTx(null)}>
-        <TouchableOpacity
-          style={styles.modalOverlay}
-          activeOpacity={1}
-          onPress={() => setDetailTx(null)}
-        >
-          <TouchableOpacity activeOpacity={1} style={[styles.modalSheet, { maxHeight: 420 }]}>
-            <View style={styles.sheetHandle} />
-            <Text style={styles.modalTitle}>Detalhes da compra</Text>
-            {detailTx && (
-              <View style={styles.txDetailContent}>
-                <View style={styles.txDetailIconWrap}>
-                  <Ionicons name="cart" size={28} color={colors.itauOrange} />
-                </View>
-                <Text style={styles.txDetailAmount}>{formatCurrency(detailTx.amount)}</Text>
-                <Text style={styles.txDetailDesc}>{detailTx.description}</Text>
-                <View style={styles.txDetailGrid}>
-                  <SummaryLine label="Data" value={new Date(detailTx.date).toLocaleDateString('pt-BR')} />
-                  <SummaryLine
-                    label="Hora"
-                    value={new Date(detailTx.date).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}
-                  />
-                  <SummaryLine label="Categoria" value={detailTx.category || '—'} />
-                  {detailTx.installment && <SummaryLine label="Parcela" value={detailTx.installment} />}
-                  <SummaryLine label="Cartão" value={`•••• ${card.lastFourDigits}`} />
-                  <SummaryLine label="Bandeira" value={card.brand.toUpperCase()} />
-                </View>
-              </View>
-            )}
-            <ActionButton title="Fechar" onPress={() => setDetailTx(null)} variant="secondary" />
-          </TouchableOpacity>
-        </TouchableOpacity>
-      </Modal>
+      {/* Tx detail */}
+      <BottomSheet visible={!!detailTx} onClose={() => setDetailTx(null)}>
+        {detailTx && (
+          <View style={{ gap: spacing.lg, alignItems: 'center' }}>
+            <Text style={s.sheetTitle}>{formatCurrency(detailTx.amount)}</Text>
+            <Text style={s.sheetSub}>{detailTx.description}</Text>
+            <View style={[s.summary, { width: '100%' }]}>
+              <Row label="Data" value={new Date(detailTx.date).toLocaleDateString('pt-BR')} />
+              <Row label="Categoria" value={detailTx.category || '—'} />
+              {detailTx.installment && <Row label="Parcela" value={detailTx.installment} />}
+            </View>
+            <ActionButton title="Fechar" variant="secondary" onPress={() => setDetailTx(null)} />
+          </View>
+        )}
+      </BottomSheet>
     </Modal>
   )
 }
 
-// ─── Helper components ───────────────────────────────────────────────
-function SummaryLine({ label, value }: { label: string; value: string }) {
+// ─── Small components ────────────────────────────────────────────────
+
+function Row({ label, value, valueColor }: { label: string; value: string; valueColor?: string }) {
   return (
-    <View style={styles.summaryRow}>
-      <Text style={styles.summaryLabel}>{label}</Text>
-      <Text style={styles.summaryValue}>{value}</Text>
+    <View style={s.row}>
+      <Text style={s.rowLabel}>{label}</Text>
+      <Text style={[s.rowValue, valueColor ? { color: valueColor } : undefined]}>{value}</Text>
     </View>
   )
 }
 
-// ─── Corporate Card Visual ───────────────────────────────────────────
-function CorporateCardVisual({ card, isActive }: { card: CreditCard; isActive: boolean }) {
-  const theme = BRAND_THEMES[card.brand] ?? BRAND_THEMES.visa
-
+function MetaItem({ label, value, highlight }: { label: string; value: string; highlight?: boolean }) {
   return (
-    <View style={[styles.cardWrapper, isActive && styles.cardWrapperActive]}>
-      <LinearGradient
-        colors={theme.gradient as [string, string, string]}
-        start={{ x: 0, y: 0 }}
-        end={{ x: 1, y: 1 }}
-        style={styles.cardFace}
-      >
-        {/* Decorative shapes */}
-        <View style={[styles.cardDeco1, { backgroundColor: `${theme.accent}15` }]} />
-        <View style={[styles.cardDeco2, { backgroundColor: `${theme.accent}10` }]} />
-
-        {/* Top row: Corporate label + Brand logo */}
-        <View style={styles.cardTopRow}>
-          <View style={styles.corporateTag}>
-            <Text style={[styles.corporateTagText, { color: theme.accent }]}>CORPORATE</Text>
-          </View>
-          <Text style={[styles.brandLogo, { color: theme.textColor }]}>{theme.logoText}</Text>
-        </View>
-
-        {/* Chip */}
-        <View style={styles.chipRow}>
-          <View style={[styles.chipEl, { backgroundColor: theme.chipColor }]}>
-            <View style={styles.chipLines}>
-              <View style={[styles.chipLine, { backgroundColor: `${theme.chipColor === '#D0D0D0' ? '#999' : '#A0A0A0'}` }]} />
-              <View style={[styles.chipLine, { backgroundColor: `${theme.chipColor === '#D0D0D0' ? '#999' : '#A0A0A0'}` }]} />
-              <View style={[styles.chipLine, { backgroundColor: `${theme.chipColor === '#D0D0D0' ? '#999' : '#A0A0A0'}` }]} />
-            </View>
-          </View>
-          <Ionicons name="wifi-outline" size={18} color={theme.textSecondary} style={{ transform: [{ rotate: '90deg' }] }} />
-        </View>
-
-        {/* Card number */}
-        <Text style={[styles.cardNumberText, { color: theme.textColor }]}>
-          •••• •••• •••• {card.lastFourDigits}
-        </Text>
-
-        {/* Bottom row: holder + bank */}
-        <View style={styles.cardBottomRow}>
-          <View style={{ flex: 1 }}>
-            <Text style={[styles.holderLabel, { color: theme.textSecondary }]}>PORTADOR</Text>
-            <Text style={[styles.holderName, { color: theme.textColor }]} numberOfLines={1}>
-              {card.holderName || 'TITULAR'}
-            </Text>
-          </View>
-          <View style={styles.bankLogo}>
-            <Text style={[styles.bankLogoText, { color: theme.accent }]}>itaú</Text>
-            <Text style={[styles.bankPJ, { color: theme.textSecondary }]}>PJ</Text>
-          </View>
-        </View>
-
-        {/* Accent stripe */}
-        <View style={[styles.accentStripe, { backgroundColor: theme.accent }]} />
-      </LinearGradient>
+    <View style={s.metaItem}>
+      <Text style={s.metaLabel}>{label}</Text>
+      <Text style={[s.metaValue, highlight && { color: colors.success }]}>{value}</Text>
     </View>
   )
 }
 
-// ─── Detail Panel (below carousel) ──────────────────────────────────
-function CardDetailPanel({
-  card,
-  onViewInvoice,
-  onCancel,
-}: {
-  card: CreditCard
-  onViewInvoice: () => void
-  onCancel: () => void
-}) {
-  const theme = BRAND_THEMES[card.brand] ?? BRAND_THEMES.visa
-  const accent = BRAND_ACCENT[card.brand] ?? colors.itauNavy
-  const usagePercent = card.limit > 0 ? Math.min((card.usedLimit / card.limit) * 100, 100) : 0
-
+function BottomSheet({ visible, onClose, children }: { visible: boolean; onClose: () => void; children: React.ReactNode }) {
   return (
-    <View style={styles.detailPanel}>
-      {/* Header */}
-      <View style={styles.detailPanelHeader}>
-        <View style={[styles.detailBrandDot, { backgroundColor: accent }]} />
-        <View style={{ flex: 1 }}>
-          <Text style={styles.detailCardName}>{theme.label}</Text>
-          <Text style={styles.detailCardSub}>
-            {card.cardType === 'corporate' ? 'Corporate PJ' : (card.cardType || 'PJ')} · •••• {card.lastFourDigits}
-          </Text>
-        </View>
-        <StatusBadge label="Ativo" variant="success" />
-      </View>
-
-      {/* Identification */}
-      <View style={styles.detailSection}>
-        <DetailInfoRow icon="person-outline" label="Portador" value={card.holderName || '—'} />
-        <DetailInfoRow icon="card-outline" label="Bandeira" value={card.brand.toUpperCase()} />
-        <DetailInfoRow icon="business-outline" label="Tipo" value={card.cardType === 'corporate' ? 'Corporate PJ' : (card.cardType || 'PJ')} />
-        <DetailInfoRow icon="calendar-outline" label="Vencimento" value={`Dia ${card.dueDay}`} />
-        <DetailInfoRow icon="today-outline" label="Fechamento" value={`Dia ${card.closingDay}`} />
-      </View>
-
-      {/* Financial block */}
-      <View style={styles.detailFinancial}>
-        <View style={styles.limitGrid}>
-          <View style={styles.limitGridItem}>
-            <Text style={styles.limitGridLabel}>Limite Total</Text>
-            <Text style={styles.limitGridValue}>{formatCurrency(card.limit)}</Text>
-          </View>
-          <View style={styles.limitGridItem}>
-            <Text style={styles.limitGridLabel}>Utilizado</Text>
-            <Text style={[styles.limitGridValue, { color: card.usedLimit > 0 ? colors.itauOrange : colors.textPrimary }]}>
-              {formatCurrency(card.usedLimit)}
-            </Text>
-          </View>
-          <View style={[styles.limitGridItem, styles.limitGridItemFull]}>
-            <Text style={styles.limitGridLabel}>Disponível</Text>
-            <Text style={[styles.limitGridValue, { color: colors.success }]}>
-              {formatCurrency(card.availableLimit)}
-            </Text>
-          </View>
-        </View>
-
-        {/* Usage bar */}
-        <View style={styles.usageBarContainer}>
-          <View style={styles.usageBarBg}>
-            <View style={[styles.usageBarFill, { width: `${usagePercent}%`, backgroundColor: accent }]} />
-          </View>
-          <Text style={styles.usagePercent}>{usagePercent.toFixed(0)}% utilizado</Text>
-        </View>
-      </View>
-
-      {/* Actions */}
-      <View style={styles.detailActions}>
-        <ActionIconButton icon="receipt-outline" label="Ver Fatura" color={accent} onPress={onViewInvoice} />
-        <ActionIconButton icon="phone-portrait-outline" label="Cartão Virtual" color={colors.itauBlue} onPress={() => Alert.alert('Cartão Virtual', 'Em breve!')} />
-        <ActionIconButton icon="lock-closed-outline" label="Bloquear" color={colors.warning} onPress={() => Alert.alert('Bloqueio', 'Em breve!')} />
-        <ActionIconButton icon="close-circle-outline" label="Cancelar" color={colors.error} onPress={onCancel} />
-      </View>
-    </View>
-  )
-}
-
-function ActionIconButton({ icon, label, color, onPress }: { icon: keyof typeof Ionicons.glyphMap; label: string; color: string; onPress: () => void }) {
-  return (
-    <TouchableOpacity style={styles.actionIconBtn} onPress={onPress} activeOpacity={0.7}>
-      <View style={[styles.actionIconCircle, { backgroundColor: `${color}12` }]}>
-        <Ionicons name={icon} size={20} color={color} />
-      </View>
-      <Text style={styles.actionIconLabel} numberOfLines={1}>{label}</Text>
-    </TouchableOpacity>
-  )
-}
-
-function DetailInfoRow({ icon, label, value }: { icon: keyof typeof Ionicons.glyphMap; label: string; value: string }) {
-  return (
-    <View style={styles.detailInfoRow}>
-      <View style={styles.detailInfoLeft}>
-        <Ionicons name={icon} size={16} color={colors.textMuted} />
-        <Text style={styles.detailInfoLabel}>{label}</Text>
-      </View>
-      <Text style={styles.detailInfoValue}>{value}</Text>
-    </View>
+    <Modal visible={visible} animationType="slide" transparent onRequestClose={onClose}>
+      <TouchableOpacity style={s.overlay} activeOpacity={1} onPress={onClose}>
+        <TouchableOpacity activeOpacity={1} style={s.sheet}>
+          <View style={s.sheetHandle} />
+          <ScrollView showsVerticalScrollIndicator={false}>{children}</ScrollView>
+        </TouchableOpacity>
+      </TouchableOpacity>
+    </Modal>
   )
 }
 
 // ─── Styles ──────────────────────────────────────────────────────────
-const styles = StyleSheet.create({
+
+const s = StyleSheet.create({
   safe: { flex: 1, backgroundColor: colors.bgPrimary },
   scroll: { flex: 1 },
-  content: { padding: spacing.xl, gap: spacing.xl, paddingBottom: spacing['4xl'] },
+  body: { padding: spacing.xl, gap: spacing.lg, paddingBottom: spacing['4xl'] },
 
   // Tabs
-  tabRow: { flexDirection: 'row', paddingHorizontal: spacing.xl, paddingVertical: spacing.md, gap: spacing.md },
-  tabBtn: { flex: 1, alignItems: 'center', paddingVertical: spacing.md, borderRadius: radius.full, backgroundColor: colors.bgInput },
-  tabBtnActive: { backgroundColor: colors.itauOrange },
-  tabText: { fontSize: fontSize.sm, fontWeight: fontWeight.semibold, color: colors.textMuted },
-  tabTextActive: { color: colors.textInverse },
+  tabBar: { flexDirection: 'row', marginHorizontal: spacing.xl, marginTop: spacing.sm, backgroundColor: colors.bgInput, borderRadius: radius.lg, padding: 3 },
+  tab: { flex: 1, paddingVertical: spacing.md, alignItems: 'center', borderRadius: radius.md },
+  tabActive: { backgroundColor: colors.bgSecondary, ...shadow.sm },
+  tabLabel: { fontSize: fontSize.sm, fontWeight: fontWeight.semibold, color: colors.textMuted },
+  tabLabelActive: { color: colors.textPrimary },
 
-  // ─── Carousel ──────────────────────────────────────────────────────
-  carouselContent: { paddingHorizontal: 32 },
+  // Credit limit banner
+  limitBanner: { backgroundColor: colors.bgSecondary, borderRadius: radius.xl, padding: spacing.xl, gap: spacing.md, ...shadow.sm },
+  limitRow: { flexDirection: 'row', justifyContent: 'space-between' },
+  limitLabel: { fontSize: fontSize.xs, color: colors.textMuted, marginBottom: 2 },
+  limitValue: { fontSize: fontSize.lg, fontWeight: fontWeight.bold, color: colors.textPrimary },
+  limitBarBg: { height: 4, backgroundColor: colors.bgInput, borderRadius: 2, overflow: 'hidden' },
+  limitBarFill: { height: 4, borderRadius: 2, backgroundColor: colors.itauOrange },
+  limitHint: { fontSize: fontSize.xs, color: colors.textMuted },
 
-  cardWrapper: {
-    width: CARD_WIDTH,
-    marginRight: CARD_SPACING,
-    transform: [{ scale: 0.95 }],
-    opacity: 0.75,
-  },
-  cardWrapperActive: {
-    transform: [{ scale: 1 }],
-    opacity: 1,
-  },
-  cardFace: {
-    width: '100%',
-    height: CARD_HEIGHT,
-    borderRadius: radius.xl,
-    padding: spacing.xl,
-    justifyContent: 'space-between',
-    overflow: 'hidden',
-    ...shadow.lg,
-  },
-  cardDeco1: {
-    position: 'absolute',
-    width: 200,
-    height: 200,
-    borderRadius: 100,
-    top: -60,
-    right: -40,
-  },
-  cardDeco2: {
-    position: 'absolute',
-    width: 150,
-    height: 150,
-    borderRadius: 75,
-    bottom: -50,
-    left: -30,
-  },
-  cardTopRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'flex-start',
-  },
-  corporateTag: {
-    backgroundColor: 'rgba(255,255,255,0.15)',
-    paddingHorizontal: spacing.md,
-    paddingVertical: spacing.xs,
-    borderRadius: radius.sm,
-  },
-  corporateTagText: {
-    fontSize: fontSize['2xs'],
-    fontWeight: fontWeight.bold,
-    letterSpacing: 1.5,
-  },
-  brandLogo: {
-    fontSize: fontSize.xl,
-    fontWeight: fontWeight.black,
-    letterSpacing: 2,
-  },
-  chipRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: spacing.md,
-  },
-  chipEl: {
-    width: 40,
-    height: 30,
-    borderRadius: 6,
-    justifyContent: 'center',
-    alignItems: 'center',
-    overflow: 'hidden',
-  },
-  chipLines: {
-    width: '100%',
-    height: '100%',
-    justifyContent: 'space-evenly',
-    paddingHorizontal: 4,
-  },
-  chipLine: {
-    height: 1.5,
-    borderRadius: 1,
-  },
-  cardNumberText: {
-    fontSize: fontSize.md,
-    fontWeight: fontWeight.semibold,
-    letterSpacing: 3,
-  },
-  cardBottomRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'flex-end',
-  },
-  holderLabel: {
-    fontSize: 8,
-    fontWeight: fontWeight.medium,
-    letterSpacing: 1,
-    marginBottom: 2,
-  },
-  holderName: {
-    fontSize: fontSize.xs,
-    fontWeight: fontWeight.bold,
-    letterSpacing: 0.5,
-  },
-  bankLogo: {
-    alignItems: 'flex-end',
-  },
-  bankLogoText: {
-    fontSize: fontSize.md,
-    fontWeight: fontWeight.black,
-    fontStyle: 'italic',
-  },
-  bankPJ: {
-    fontSize: 8,
-    fontWeight: fontWeight.bold,
-    letterSpacing: 1,
-    marginTop: -2,
-  },
-  accentStripe: {
-    position: 'absolute',
-    bottom: 0,
-    left: 0,
-    right: 0,
-    height: 3,
-  },
+  // Card list
+  cardList: { gap: spacing.md },
+  cardRow: { backgroundColor: colors.bgSecondary, borderRadius: radius.xl, padding: spacing.xl, gap: spacing.lg, ...shadow.sm },
+  miniChip: { width: 80, height: 50, borderRadius: radius.md, alignItems: 'center', justifyContent: 'center', gap: 2, alignSelf: 'flex-start' },
+  miniChipLabel: { fontSize: 9, fontWeight: fontWeight.bold, color: 'rgba(255,255,255,0.8)', letterSpacing: 0.3 },
+  miniChipBrand: { fontSize: 8, fontWeight: fontWeight.bold, color: 'rgba(255,255,255,0.5)', letterSpacing: 0.5 },
+  miniChipDigits: { fontSize: fontSize.xs, fontWeight: fontWeight.bold, color: '#FFF' },
+  cardRowInfo: { flex: 1, gap: spacing.md },
+  cardRowTop: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
+  cardRowName: { fontSize: fontSize.md, fontWeight: fontWeight.bold, color: colors.textPrimary, flex: 1, marginRight: spacing.sm },
+  cardRowLimits: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-end' },
+  cardRowLimitLabel: { fontSize: fontSize.xs, color: colors.textMuted, marginBottom: 2 },
+  cardRowLimitValue: { fontSize: fontSize.sm, fontWeight: fontWeight.semibold, color: colors.textPrimary },
+  cardRowBarBg: { height: 5, backgroundColor: colors.bgInput, borderRadius: 3, overflow: 'hidden' },
+  cardRowBarFill: { height: 5, borderRadius: 3, backgroundColor: colors.itauOrange },
+  miniBarBg: { height: 4, backgroundColor: colors.bgInput, borderRadius: 2, overflow: 'hidden' },
+  miniBarFill: { height: 4, borderRadius: 2, backgroundColor: colors.itauOrange },
 
-  // Dot indicators
-  dotRow: {
-    flexDirection: 'row',
-    justifyContent: 'center',
-    gap: spacing.sm,
-    marginTop: spacing.md,
-  },
-  dot: {
-    width: 8,
-    height: 8,
-    borderRadius: 4,
-    backgroundColor: colors.borderLight,
-  },
-  dotActive: {
-    backgroundColor: colors.itauOrange,
-    width: 24,
-  },
+  // Empty
+  empty: { alignItems: 'center', paddingVertical: spacing['3xl'], gap: spacing.md },
+  emptyTitle: { fontSize: fontSize.md, fontWeight: fontWeight.semibold, color: colors.textPrimary },
+  emptyDesc: { fontSize: fontSize.sm, color: colors.textMuted, textAlign: 'center' },
+  emptyBtn: { marginTop: spacing.md, paddingVertical: spacing.md, paddingHorizontal: spacing.xl, borderRadius: radius.full, borderWidth: 1.5, borderColor: colors.itauOrange },
+  emptyBtnText: { fontSize: fontSize.sm, fontWeight: fontWeight.semibold, color: colors.itauOrange },
 
-  // ─── Detail Panel ──────────────────────────────────────────────────
-  detailPanel: {
-    backgroundColor: colors.bgSecondary,
-    borderRadius: radius.xl,
-    padding: spacing.xl,
-    gap: spacing.xl,
-    ...shadow.sm,
-  },
-  detailPanelHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: spacing.md,
-  },
-  detailBrandDot: {
-    width: 12,
-    height: 12,
-    borderRadius: 6,
-  },
-  detailCardName: {
-    fontSize: fontSize.md,
-    fontWeight: fontWeight.bold,
-    color: colors.textPrimary,
-  },
-  detailCardSub: {
-    fontSize: fontSize.xs,
-    color: colors.textMuted,
-    marginTop: 2,
-  },
-  detailSection: {
-    backgroundColor: colors.bgInput,
-    borderRadius: radius.lg,
-    padding: spacing.lg,
-    gap: spacing.md,
-  },
-  detailInfoRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-  },
-  detailInfoLeft: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: spacing.sm,
-  },
-  detailInfoLabel: {
-    fontSize: fontSize.sm,
-    color: colors.textMuted,
-  },
-  detailInfoValue: {
-    fontSize: fontSize.sm,
-    fontWeight: fontWeight.semibold,
-    color: colors.textPrimary,
-  },
-  detailFinancial: {
-    gap: spacing.lg,
-  },
-  limitGrid: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: spacing.md,
-  },
-  limitGridItem: {
-    flex: 1,
-    minWidth: '40%',
-    backgroundColor: colors.bgInput,
-    borderRadius: radius.lg,
-    padding: spacing.lg,
-    alignItems: 'center',
-    gap: spacing.xs,
-  },
-  limitGridItemFull: {
-    flex: 2,
-    minWidth: '90%',
-  },
-  limitGridLabel: {
-    fontSize: fontSize.xs,
-    color: colors.textMuted,
-  },
-  limitGridValue: {
-    fontSize: fontSize.lg,
-    fontWeight: fontWeight.bold,
-    color: colors.textPrimary,
-  },
-  usageBarContainer: {
-    gap: spacing.xs,
-  },
-  usageBarBg: {
-    height: 6,
-    backgroundColor: colors.bgInput,
-    borderRadius: 3,
-    overflow: 'hidden',
-  },
-  usageBarFill: {
-    height: 6,
-    borderRadius: 3,
-  },
-  usagePercent: {
-    fontSize: fontSize.xs,
-    color: colors.textMuted,
-    textAlign: 'right',
-  },
-  detailActions: {
-    flexDirection: 'row',
-    justifyContent: 'space-around',
-    paddingTop: spacing.md,
-    borderTopWidth: 1,
-    borderTopColor: colors.borderLight,
-  },
-  actionIconBtn: {
-    alignItems: 'center',
-    gap: spacing.sm,
-    width: 72,
-  },
-  actionIconCircle: {
-    width: 44,
-    height: 44,
-    borderRadius: 22,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  actionIconLabel: {
-    fontSize: fontSize['2xs'],
-    fontWeight: fontWeight.medium,
-    color: colors.textSecondary,
-    textAlign: 'center',
-  },
+  sectionTitle: { fontSize: fontSize.xl, fontWeight: fontWeight.bold, color: colors.textPrimary },
 
-  // ─── Empty state ──────────────────────────────────────────────────
-  emptyState: { alignItems: 'center', paddingVertical: spacing['3xl'], backgroundColor: colors.bgSecondary, borderRadius: radius.xl, paddingHorizontal: spacing.xl },
-  emptyIcon: { width: 80, height: 80, borderRadius: 40, backgroundColor: colors.itauOrangeSoft, alignItems: 'center', justifyContent: 'center', marginBottom: spacing.xl },
-  emptyTitle: { fontSize: fontSize.lg, fontWeight: fontWeight.bold, color: colors.textPrimary, marginBottom: spacing.sm },
-  emptySubtext: { fontSize: fontSize.sm, color: colors.textMuted, textAlign: 'center', marginBottom: spacing.xl },
-  ctaButton: {
-    flexDirection: 'row', alignItems: 'center', gap: spacing.md,
-    backgroundColor: colors.itauOrange, borderRadius: radius.xl,
-    paddingVertical: spacing.xl, paddingHorizontal: spacing['2xl'],
-    ...shadow.md,
-  },
-  ctaText: { fontSize: fontSize.md, fontWeight: fontWeight.bold, color: colors.textInverse },
+  // Catalog card
+  catalogCard: { backgroundColor: colors.bgSecondary, borderRadius: radius.xl, overflow: 'hidden', ...shadow.sm },
+  catalogVisual: { paddingVertical: spacing.xl, paddingHorizontal: spacing.xl, gap: 2 },
+  catalogVisualName: { fontSize: fontSize.md, fontWeight: fontWeight.bold, letterSpacing: 0.3 },
+  catalogVisualBrand: { fontSize: fontSize.xs },
+  virtualTag: { position: 'absolute', top: spacing.md, right: spacing.md, flexDirection: 'row', alignItems: 'center', gap: 3, backgroundColor: 'rgba(0,0,0,0.3)', borderRadius: radius.full, paddingHorizontal: spacing.sm, paddingVertical: 2 },
+  virtualTagText: { fontSize: 9, fontWeight: fontWeight.bold, color: '#FFF' },
+  catalogInfo: { padding: spacing.xl, gap: spacing.lg },
+  catalogName: { fontSize: fontSize.lg, fontWeight: fontWeight.bold, color: colors.textPrimary },
+  catalogDesc: { fontSize: fontSize.sm, color: colors.textSecondary, marginTop: -spacing.sm },
+  catalogMeta: { flexDirection: 'row', justifyContent: 'space-between' },
+  metaItem: { alignItems: 'center', gap: 2 },
+  metaLabel: { fontSize: fontSize['2xs'], color: colors.textMuted, textTransform: 'uppercase', letterSpacing: 0.3 },
+  metaValue: { fontSize: fontSize.sm, fontWeight: fontWeight.bold, color: colors.textPrimary },
+  benefitsBtn: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: spacing.xs },
+  benefitsBtnText: { fontSize: fontSize.sm, fontWeight: fontWeight.semibold, color: colors.itauOrange },
+  benefitsList: { gap: spacing.sm },
+  benefitItem: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm },
+  benefitText: { fontSize: fontSize.sm, color: colors.textPrimary },
+  disabledMsg: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: spacing.sm, paddingVertical: spacing.md },
+  disabledMsgText: { fontSize: fontSize.sm, color: colors.error },
+  contractBtn: { backgroundColor: colors.itauOrange, borderRadius: radius.lg, paddingVertical: spacing.lg, alignItems: 'center' },
+  contractBtnText: { fontSize: fontSize.md, fontWeight: fontWeight.bold, color: '#FFF' },
 
-  // Offers
-  offersTitle: { fontSize: fontSize.xl, fontWeight: fontWeight.bold, color: colors.textPrimary },
-  offersSubtitle: { fontSize: fontSize.sm, color: colors.textSecondary, marginTop: -spacing.md },
+  // Detail sheet
+  detailHeader: { flexDirection: 'row', gap: spacing.lg, alignItems: 'center' },
+  detailChip: { width: 72, height: 48, borderRadius: radius.md, padding: spacing.sm, justifyContent: 'space-between' },
+  detailChipLine1: { fontSize: 9, fontWeight: fontWeight.bold, color: '#FFF' },
+  detailChipDigits: { fontSize: fontSize['2xs'], fontWeight: fontWeight.bold, color: '#FFF' },
+  detailChipBrand: { fontSize: 7, color: 'rgba(255,255,255,0.6)', fontWeight: fontWeight.bold },
+  detailName: { fontSize: fontSize.lg, fontWeight: fontWeight.bold, color: colors.textPrimary },
+  detailSub: { fontSize: fontSize.xs, color: colors.textMuted },
+  detailLimits: { backgroundColor: colors.bgInput, borderRadius: radius.lg, padding: spacing.lg, gap: spacing.md },
+  detailInfo: { gap: spacing.md },
+  detailActions: { flexDirection: 'row', gap: spacing.md },
+  detailAction: { flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: spacing.sm, paddingVertical: spacing.md, borderRadius: radius.lg, borderWidth: 1.5, borderColor: colors.itauOrange },
+  detailActionLabel: { fontSize: fontSize.sm, fontWeight: fontWeight.semibold, color: colors.itauOrange },
 
-  // Offer card previews
-  offerCardWrap: {
-    borderRadius: radius.xl,
-    borderWidth: 2,
-    borderColor: 'transparent',
-    overflow: 'hidden',
-  },
-  offerCardWrapActive: {
-    borderColor: colors.itauOrange,
-    ...shadow.md,
-  },
-  offerCardFace: {
-    width: '100%',
-    height: CARD_HEIGHT * 0.85,
-    borderRadius: radius.xl - 2,
-    padding: spacing.lg,
-    justifyContent: 'space-between',
-    overflow: 'hidden',
-  },
-  offerSelectedBadge: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: spacing.sm,
-    paddingVertical: spacing.md,
-    backgroundColor: colors.itauOrangeSoft,
-  },
-  offerSelectedText: {
-    fontSize: fontSize.sm,
-    fontWeight: fontWeight.bold,
-    color: colors.itauOrange,
-  },
+  // Contract sheet
+  creditInfo: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm, backgroundColor: colors.infoLight, borderRadius: radius.md, padding: spacing.md },
+  creditInfoText: { fontSize: fontSize.sm, color: colors.itauBlue, flex: 1 },
+  fieldLabel: { fontSize: fontSize.sm, fontWeight: fontWeight.medium, color: colors.textSecondary, marginBottom: spacing.xs },
+  sliderVal: { fontSize: fontSize['2xl'], fontWeight: fontWeight.bold, color: colors.itauOrange, textAlign: 'center' },
+  sliderLabels: { flexDirection: 'row', justifyContent: 'space-between' },
+  sliderMin: { fontSize: fontSize.xs, color: colors.textMuted },
+  dueDayRow: { flexDirection: 'row', gap: spacing.sm, flexWrap: 'wrap' },
+  dueDayChip: { width: 42, height: 42, borderRadius: 21, alignItems: 'center', justifyContent: 'center', backgroundColor: colors.bgInput },
+  dueDayActive: { backgroundColor: colors.itauOrange },
+  dueDayText: { fontSize: fontSize.sm, fontWeight: fontWeight.semibold, color: colors.textMuted },
+  dueDayTextActive: { color: '#FFF' },
 
-  // Contract modal
-  contractScroll: { flexGrow: 1, justifyContent: 'flex-end' },
-  modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'flex-end' },
-  modalSheet: { backgroundColor: colors.bgSecondary, borderTopLeftRadius: radius['3xl'], borderTopRightRadius: radius['3xl'], padding: spacing.xl, gap: spacing.lg },
-  sheetHandle: { width: 40, height: 4, borderRadius: 2, backgroundColor: colors.borderLight, alignSelf: 'center' },
-  modalTitle: { fontSize: fontSize.xl, fontWeight: fontWeight.bold, color: colors.textPrimary },
-  fieldLabel: { fontSize: fontSize.sm, fontWeight: fontWeight.medium, color: colors.textSecondary },
+  summary: { backgroundColor: colors.bgInput, borderRadius: radius.lg, padding: spacing.lg, gap: spacing.md },
+  row: { flexDirection: 'row', justifyContent: 'space-between' },
+  rowLabel: { fontSize: fontSize.sm, color: colors.textMuted },
+  rowValue: { fontSize: fontSize.sm, fontWeight: fontWeight.semibold, color: colors.textPrimary },
+
   btnRow: { flexDirection: 'row', gap: spacing.md },
 
-  // Slider visual
-  sliderValue: { fontSize: fontSize['2xl'], fontWeight: fontWeight.bold, color: colors.itauOrange, textAlign: 'center' },
-  sliderLabels: { flexDirection: 'row', justifyContent: 'space-between' },
-  sliderMinMax: { fontSize: fontSize.xs, color: colors.textMuted },
+  // Bottom sheet
+  overlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.4)', justifyContent: 'flex-end' },
+  sheet: { backgroundColor: colors.bgSecondary, borderTopLeftRadius: radius['3xl'], borderTopRightRadius: radius['3xl'], padding: spacing.xl, maxHeight: '85%' },
+  sheetHandle: { width: 36, height: 4, borderRadius: 2, backgroundColor: colors.borderLight, alignSelf: 'center', marginBottom: spacing.lg },
+  sheetTitle: { fontSize: fontSize.xl, fontWeight: fontWeight.bold, color: colors.textPrimary },
+  sheetSub: { fontSize: fontSize.sm, color: colors.textMuted, marginTop: -spacing.sm },
 
-  dueDayRow: { flexDirection: 'row', gap: spacing.sm, flexWrap: 'wrap' },
-  dueDayChip: { width: 44, height: 44, borderRadius: 22, alignItems: 'center', justifyContent: 'center', backgroundColor: colors.bgInput, borderWidth: 1.5, borderColor: colors.borderLight },
-  dueDayChipActive: { borderColor: colors.itauOrange, backgroundColor: colors.itauOrangeSoft },
-  dueDayText: { fontSize: fontSize.sm, fontWeight: fontWeight.semibold, color: colors.textMuted },
-  dueDayTextActive: { color: colors.itauOrange },
-
-  summaryCard: { backgroundColor: colors.bgInput, borderRadius: radius.lg, padding: spacing.lg, gap: spacing.md },
-  summaryRow: { flexDirection: 'row', justifyContent: 'space-between' },
-  summaryLabel: { fontSize: fontSize.sm, color: colors.textMuted },
-  summaryValue: { fontSize: fontSize.sm, fontWeight: fontWeight.semibold, color: colors.textPrimary },
-
-  // Payment
-  paymentSub: { fontSize: fontSize.sm, color: colors.textSecondary, marginTop: -spacing.sm },
-  paymentBox: { alignItems: 'center', paddingVertical: spacing.xl, backgroundColor: colors.bgInput, borderRadius: radius.xl, gap: spacing.sm },
-  paymentLabel: { fontSize: fontSize.sm, color: colors.textMuted },
-  paymentValue: { fontSize: fontSize['3xl'], fontWeight: fontWeight.bold, color: colors.itauOrange },
-  paymentNote: { fontSize: fontSize.xs, color: colors.textMuted },
-  paymentDone: { alignItems: 'center', paddingVertical: spacing.xl, gap: spacing.lg },
-  paymentCheck: { width: 64, height: 64, borderRadius: 32, backgroundColor: colors.success, alignItems: 'center', justifyContent: 'center' },
-  paymentDoneTitle: { fontSize: fontSize.xl, fontWeight: fontWeight.bold, color: colors.textPrimary },
-  paymentDoneSub: { fontSize: fontSize.sm, color: colors.textSecondary, textAlign: 'center' },
-  receiptCard: { width: '100%', backgroundColor: colors.bgInput, borderRadius: radius.lg, padding: spacing.lg, gap: spacing.md },
+  // Pay
+  payBox: { alignItems: 'center', paddingVertical: spacing.xl, backgroundColor: colors.bgInput, borderRadius: radius.xl, gap: spacing.sm },
+  payBoxLabel: { fontSize: fontSize.sm, color: colors.textMuted },
+  payBoxValue: { fontSize: fontSize['3xl'], fontWeight: fontWeight.bold, color: colors.itauOrange },
+  center: { alignItems: 'center', paddingVertical: spacing['2xl'], gap: spacing.lg },
+  checkCircle: { width: 56, height: 56, borderRadius: 28, backgroundColor: colors.success, alignItems: 'center', justifyContent: 'center' },
+  payDoneTitle: { fontSize: fontSize.xl, fontWeight: fontWeight.bold, color: colors.textPrimary },
+  payDoneSub: { fontSize: fontSize.sm, color: colors.textMuted },
 
   // Invoice
   invoiceSafe: { flex: 1, backgroundColor: colors.bgPrimary },
   invoiceHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: spacing.xl, paddingVertical: spacing.lg, borderBottomWidth: 1, borderBottomColor: colors.borderLight },
-  invoiceBackBtn: { flexDirection: 'row', alignItems: 'center', gap: spacing.xs, minWidth: 80, paddingVertical: spacing.sm },
-  invoiceBackText: { fontSize: fontSize.md, fontWeight: fontWeight.semibold, color: colors.itauOrange },
-  invoiceHTitle: { fontSize: fontSize.lg, fontWeight: fontWeight.bold, color: colors.textPrimary },
-  invoiceSummary: { backgroundColor: colors.bgSecondary, borderRadius: radius.xl, padding: spacing.xl, alignItems: 'center', gap: spacing.md, ...shadow.sm },
-  invoiceSumLabel: { fontSize: fontSize.sm, color: colors.textMuted },
-  invoiceTotal: { fontSize: fontSize['3xl'], fontWeight: fontWeight.bold, color: colors.textPrimary },
-  invoiceDue: { fontSize: fontSize.xs, color: colors.textMuted },
-  invoiceTxList: { backgroundColor: colors.bgSecondary, borderRadius: radius.xl, padding: spacing.lg, ...shadow.sm },
-  invoiceTxTitle: { fontSize: fontSize.md, fontWeight: fontWeight.bold, color: colors.textPrimary, marginBottom: spacing.lg },
-  invoiceTxRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.lg, paddingVertical: spacing.md, borderBottomWidth: 1, borderBottomColor: colors.borderLight },
-  invoiceTxIcon: { width: 36, height: 36, borderRadius: radius.md, backgroundColor: colors.itauOrangeSoft, alignItems: 'center', justifyContent: 'center' },
-  invoiceTxInfo: { flex: 1 },
-  invoiceTxDesc: { fontSize: fontSize.sm, fontWeight: fontWeight.semibold, color: colors.textPrimary },
-  invoiceTxMeta: { fontSize: fontSize.xs, color: colors.textMuted, marginTop: spacing['2xs'] },
-  invoiceTxRight: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm },
-  invoiceTxAmount: { fontSize: fontSize.sm, fontWeight: fontWeight.bold, color: colors.textPrimary },
-  emptyInvoice: { alignItems: 'center', paddingVertical: spacing['3xl'], backgroundColor: colors.bgSecondary, borderRadius: radius.xl, gap: spacing.md },
-
-  // Transaction detail
-  txDetailContent: { alignItems: 'center', gap: spacing.lg },
-  txDetailIconWrap: { width: 56, height: 56, borderRadius: 28, backgroundColor: colors.itauOrangeSoft, alignItems: 'center', justifyContent: 'center' },
-  txDetailAmount: { fontSize: fontSize['3xl'], fontWeight: fontWeight.bold, color: colors.textPrimary },
-  txDetailDesc: { fontSize: fontSize.md, color: colors.textSecondary, textAlign: 'center' },
-  txDetailGrid: { width: '100%', backgroundColor: colors.bgInput, borderRadius: radius.lg, padding: spacing.lg, gap: spacing.md },
+  invoiceHTitle: { fontSize: fontSize.md, fontWeight: fontWeight.bold, color: colors.textPrimary },
+  invoiceTotal: { backgroundColor: colors.bgSecondary, borderRadius: radius.xl, padding: spacing.xl, alignItems: 'center', gap: spacing.sm, ...shadow.sm },
+  invoiceTotalLabel: { fontSize: fontSize.sm, color: colors.textMuted },
+  invoiceTotalVal: { fontSize: fontSize['3xl'], fontWeight: fontWeight.bold, color: colors.textPrimary },
+  invoiceTotalDue: { fontSize: fontSize.xs, color: colors.textMuted },
+  txSection: { backgroundColor: colors.bgSecondary, borderRadius: radius.xl, padding: spacing.lg, ...shadow.sm },
+  txSectionTitle: { fontSize: fontSize.md, fontWeight: fontWeight.bold, color: colors.textPrimary, marginBottom: spacing.md },
+  txRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.md, paddingVertical: spacing.md, borderBottomWidth: 1, borderBottomColor: colors.borderLight },
+  txDot: { width: 8, height: 8, borderRadius: 4, backgroundColor: colors.itauOrange },
+  txDesc: { fontSize: fontSize.sm, fontWeight: fontWeight.medium, color: colors.textPrimary },
+  txMeta: { fontSize: fontSize.xs, color: colors.textMuted, marginTop: 1 },
+  txAmount: { fontSize: fontSize.sm, fontWeight: fontWeight.bold, color: colors.textPrimary },
 })

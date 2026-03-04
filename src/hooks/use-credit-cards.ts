@@ -7,7 +7,9 @@ import type { CreditCardRequest } from '@/types'
 export const creditCardKeys = {
   all: ['credit-cards'] as const,
   list: (customerId: string) => [...creditCardKeys.all, 'list', customerId] as const,
-  invoice: (cardId: string, month: string) => [...creditCardKeys.all, 'invoice', cardId, month] as const,
+  available: (customerId: string) => [...creditCardKeys.all, 'available', customerId] as const,
+  invoice: (cardId: string, month?: string) => [...creditCardKeys.all, 'invoice', cardId, month] as const,
+  creditLimit: (customerId: string) => [...creditCardKeys.all, 'credit-limit', customerId] as const,
 }
 
 export function useCreditCards(customerId: string | null) {
@@ -18,11 +20,11 @@ export function useCreditCards(customerId: string | null) {
   })
 }
 
-export function useCreditCardInvoice(cardId: string | null, month: string) {
+export function useCreditCardInvoice(customerId: string | null, cardId: string | null, month?: string) {
   return useQuery({
     queryKey: creditCardKeys.invoice(cardId!, month),
-    queryFn: () => creditCardService.getInvoice(cardId!, month),
-    enabled: !!cardId,
+    queryFn: () => creditCardService.getInvoice(customerId!, cardId!, month),
+    enabled: !!customerId && !!cardId,
   })
 }
 
@@ -39,9 +41,25 @@ export function useRequestCreditCard() {
 export function useCancelCreditCard() {
   const queryClient = useQueryClient()
   return useMutation({
-    mutationFn: ({ cardId }: { cardId: string; customerId: string }) => creditCardService.cancel(cardId),
+    mutationFn: ({ cardId, customerId }: { cardId: string; customerId: string }) => creditCardService.cancel(customerId, cardId),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: creditCardKeys.all })
     },
+  })
+}
+
+export function useCreditLimit(customerId: string | null) {
+  return useQuery({
+    queryKey: creditCardKeys.creditLimit(customerId!),
+    queryFn: () => creditCardService.getCreditLimit(customerId!),
+    enabled: !!customerId,
+  })
+}
+
+export function useAvailableCards(customerId: string | null) {
+  return useQuery({
+    queryKey: creditCardKeys.available(customerId!),
+    queryFn: () => creditCardService.listAvailable(customerId!),
+    enabled: !!customerId,
   })
 }

@@ -1,7 +1,7 @@
 export { useCustomerProfile, customerKeys } from './use-customer'
 export { useTransactions, useTransactionSummary, transactionKeys } from './use-transactions'
 export { useHealthStatus, useChatMetrics, metricsKeys } from './use-metrics'
-export { useCreditCards, useCreditCardInvoice, useRequestCreditCard, useCancelCreditCard, creditCardKeys } from './use-credit-cards'
+export { useCreditCards, useCreditCardInvoice, useRequestCreditCard, useCancelCreditCard, useCreditLimit, useAvailableCards, creditCardKeys } from './use-credit-cards'
 export { useFinancialSummary, financialKeys } from './use-financial'
 export { useBillPaymentHistory, billPaymentKeys } from './use-bill-payments'
 export { useScheduledPix, pixKeys } from './use-pix'

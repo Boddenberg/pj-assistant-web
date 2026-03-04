@@ -4,67 +4,29 @@
 import { httpClient } from '@/lib'
 import type { LoginRequest, LoginResponse, RegisterRequest, RegisterResponse } from '@/types'
 
-// ── Backend returns snake_case; map to camelCase for the frontend ────
-
-interface LoginResponseRaw {
-  access_token: string
-  refresh_token: string
-  expires_in: number
-  customer_id: string
-  customer_name: string
-  company_name: string
-}
-
-interface RegisterResponseRaw {
-  customer_id: string
-  agencia: string
-  conta: string
-  message: string
-}
-
-function mapLogin(r: LoginResponseRaw): LoginResponse {
-  return {
-    accessToken: r.access_token,
-    refreshToken: r.refresh_token,
-    expiresIn: r.expires_in,
-    customerId: r.customer_id,
-    customerName: r.customer_name,
-    companyName: r.company_name,
-  }
-}
-
-function mapRegister(r: RegisterResponseRaw): RegisterResponse {
-  return {
-    customerId: r.customer_id,
-    agencia: r.agencia,
-    conta: r.conta,
-    message: r.message,
-  }
-}
-
 export const authService = {
   async login(data: LoginRequest): Promise<LoginResponse> {
-    const { data: raw } = await httpClient.post<LoginResponseRaw>(
+    const { data: result } = await httpClient.post<LoginResponse>(
       '/v1/auth/login',
       data,
     )
-    return mapLogin(raw)
+    return result
   },
 
   async register(data: RegisterRequest): Promise<RegisterResponse> {
-    const { data: raw } = await httpClient.post<RegisterResponseRaw>(
+    const { data: result } = await httpClient.post<RegisterResponse>(
       '/v1/auth/register',
       data,
     )
-    return mapRegister(raw)
+    return result
   },
 
   async refreshToken(refreshToken: string): Promise<LoginResponse> {
-    const { data: raw } = await httpClient.post<LoginResponseRaw>(
+    const { data: result } = await httpClient.post<LoginResponse>(
       '/v1/auth/refresh',
-      { refresh_token: refreshToken },
+      { refreshToken },
     )
-    return mapLogin(raw)
+    return result
   },
 
   async logout(accessToken: string): Promise<void> {
