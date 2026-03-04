@@ -17,7 +17,7 @@ import { useCustomerStore, useOnboardingChatStore, useChatStore } from '@/stores
 import { authService } from '@/services/auth.service'
 import { ChatBubble, ChatInput, TypingIndicator } from '@/components/chat'
 import { getOnboardingProgress } from '@/types'
-import { resetTempSessionId } from '@/lib'
+import { resetTempSessionId, AppError } from '@/lib'
 import type {
   AuthStep, LoginRequest, RegisterStep1Data,
   RegisterStep2Data, RegisterStep3Data,
@@ -329,9 +329,11 @@ export default function AuthScreen() {
         return // success — exit early
       } catch (err) {
         lastError = err
-        // Don't retry on 401/403 (wrong credentials)
-        const status = (err as { response?: { status?: number } })?.response?.status
-        if (status === 401 || status === 403) break
+        // Don't retry on auth errors (wrong credentials)
+        const isAuthError =
+          (err instanceof AppError &&
+            (err.code === 'UNAUTHORIZED' || err.code === 'FORBIDDEN'))
+        if (isAuthError) break
 
         // Wait before next attempt (2s, 4s, 8s)
         if (attempt < MAX_ATTEMPTS) {
@@ -341,8 +343,10 @@ export default function AuthScreen() {
     }
 
     // All attempts failed
-    const status = (lastError as { response?: { status?: number } })?.response?.status
-    if (status === 401 || status === 403) {
+    const isAuthError =
+      (lastError instanceof AppError &&
+        (lastError.code === 'UNAUTHORIZED' || lastError.code === 'FORBIDDEN'))
+    if (isAuthError) {
       setGeneralError('CPF ou senha incorretos. Tente novamente.')
     } else {
       setGeneralError('Não foi possível conectar. Verifique sua internet e tente novamente.')
