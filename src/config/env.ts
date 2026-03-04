@@ -10,7 +10,7 @@ interface EnvConfig {
 function loadEnv(): EnvConfig {
   const extra = Constants.expoConfig?.extra ?? {}
   return {
-    API_BASE_URL: (extra.apiBaseUrl as string) ?? 'https://pj-assistant-bfa-go-production.up.railway.app',
+    API_BASE_URL: (extra.apiBaseUrl as string) ?? 'http://localhost:8080',
     APP_ENV: (extra.appEnv as EnvConfig['APP_ENV']) ?? 'development',
     REQUEST_TIMEOUT_MS: (extra.requestTimeoutMs as number) ?? 30_000,
   }

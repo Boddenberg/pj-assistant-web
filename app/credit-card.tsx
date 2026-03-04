@@ -506,19 +506,43 @@ function CatalogCard({ product, disabled, availableCredit, onContract }: {
 
   return (
     <View style={[s.catalogCard, disabled && { opacity: 0.5 }]}>
-      {/* Mini visual */}
+      {/* Credit card visual — looks like a real card */}
       <View style={[s.catalogVisual, { backgroundColor: product.gradient[0] }]}>
-        <Text style={[s.catalogVisualName, { color: product.textColor }]}>itaú PJ {product.name}</Text>
-        <Text style={[s.catalogVisualBrand, { color: product.textSecondary }]}>{brandLabel(product.brand)}</Text>
-        {product.isVirtual && (
-          <View style={s.virtualTag}>
-            <Ionicons name="phone-portrait-outline" size={10} color="#FFF" />
-            <Text style={s.virtualTagText}>Virtual</Text>
+        {/* Top row: brand + virtual badge */}
+        <View style={s.catalogVisualTop}>
+          <View>
+            <Text style={[s.catalogVisualItau, { color: product.accent }]}>itaú</Text>
+            <Text style={[s.catalogVisualPj, { color: product.textSecondary }]}>empresas</Text>
           </View>
-        )}
+          {product.isVirtual && (
+            <View style={s.virtualTag}>
+              <Ionicons name="phone-portrait-outline" size={10} color="#FFF" />
+              <Text style={s.virtualTagText}>Virtual</Text>
+            </View>
+          )}
+        </View>
+
+        {/* Chip icon */}
+        <View style={s.catalogChipIcon}>
+          <View style={[s.catalogChipRect, { backgroundColor: product.textSecondary }]} />
+        </View>
+
+        {/* Card number placeholder */}
+        <Text style={[s.catalogCardNumber, { color: product.textColor }]}>
+          ••••  ••••  ••••  ••••
+        </Text>
+
+        {/* Bottom row: product name + brand */}
+        <View style={s.catalogVisualBottom}>
+          <Text style={[s.catalogVisualName, { color: product.textColor }]}>{product.logoText}</Text>
+          <Text style={[s.catalogVisualBrand, { color: product.textSecondary }]}>{brandLabel(product.brand)}</Text>
+        </View>
+
+        {/* Accent stripe */}
+        <View style={[s.catalogStripe, { backgroundColor: product.accent }]} />
       </View>
 
-      {/* Info */}
+      {/* Info section */}
       <View style={s.catalogInfo}>
         <Text style={s.catalogName}>{product.name}</Text>
         <Text style={s.catalogDesc}>{product.description}</Text>
@@ -531,7 +555,8 @@ function CatalogCard({ product, disabled, availableCredit, onContract }: {
 
         {/* Benefits toggle */}
         <TouchableOpacity style={s.benefitsBtn} onPress={() => setExpanded(!expanded)} activeOpacity={0.7}>
-          <Text style={s.benefitsBtnText}>{expanded ? 'Ocultar' : 'Benefícios'}</Text>
+          <Ionicons name={expanded ? 'checkmark-circle' : 'gift-outline'} size={16} color={colors.itauOrange} />
+          <Text style={s.benefitsBtnText}>{expanded ? 'Ocultar benefícios' : 'Ver benefícios'}</Text>
           <Ionicons name={expanded ? 'chevron-up' : 'chevron-down'} size={14} color={colors.itauOrange} />
         </TouchableOpacity>
 
@@ -539,7 +564,9 @@ function CatalogCard({ product, disabled, availableCredit, onContract }: {
           <View style={s.benefitsList}>
             {product.benefits.map((b: string, i: number) => (
               <View key={i} style={s.benefitItem}>
-                <Ionicons name="checkmark" size={14} color={colors.success} />
+                <View style={s.benefitCheck}>
+                  <Ionicons name="checkmark" size={12} color="#FFF" />
+                </View>
                 <Text style={s.benefitText}>{b}</Text>
               </View>
             ))}
@@ -553,7 +580,8 @@ function CatalogCard({ product, disabled, availableCredit, onContract }: {
           </View>
         ) : (
           <TouchableOpacity style={s.contractBtn} onPress={onContract} activeOpacity={0.8}>
-            <Text style={s.contractBtnText}>Contratar</Text>
+            <Ionicons name="card-outline" size={18} color="#FFF" />
+            <Text style={s.contractBtnText}>Contratar cartão</Text>
           </TouchableOpacity>
         )}
       </View>
@@ -803,12 +831,20 @@ const s = StyleSheet.create({
 
   sectionTitle: { fontSize: fontSize.xl, fontWeight: fontWeight.bold, color: colors.textPrimary },
 
-  // Catalog card
-  catalogCard: { backgroundColor: colors.bgSecondary, borderRadius: radius.xl, overflow: 'hidden', ...shadow.sm },
-  catalogVisual: { paddingVertical: spacing.xl, paddingHorizontal: spacing.xl, gap: 2 },
-  catalogVisualName: { fontSize: fontSize.md, fontWeight: fontWeight.bold, letterSpacing: 0.3 },
-  catalogVisualBrand: { fontSize: fontSize.xs },
-  virtualTag: { position: 'absolute', top: spacing.md, right: spacing.md, flexDirection: 'row', alignItems: 'center', gap: 3, backgroundColor: 'rgba(0,0,0,0.3)', borderRadius: radius.full, paddingHorizontal: spacing.sm, paddingVertical: 2 },
+  // Catalog card — credit card visual
+  catalogCard: { backgroundColor: colors.bgSecondary, borderRadius: radius.xl, overflow: 'hidden', ...shadow.sm, marginBottom: spacing.sm },
+  catalogVisual: { paddingVertical: spacing.lg, paddingHorizontal: spacing.xl, gap: spacing.md, minHeight: 180, justifyContent: 'space-between', position: 'relative' as const, overflow: 'hidden' as const },
+  catalogVisualTop: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start' },
+  catalogVisualItau: { fontSize: fontSize.xl, fontWeight: fontWeight.bold, letterSpacing: 1 },
+  catalogVisualPj: { fontSize: fontSize['2xs'], letterSpacing: 1.5, textTransform: 'uppercase' as const, marginTop: -2 },
+  catalogChipIcon: { width: 36, height: 26, borderRadius: 4, borderWidth: 1.5, borderColor: 'rgba(255,255,255,0.35)', justifyContent: 'center', alignItems: 'center', overflow: 'hidden' as const },
+  catalogChipRect: { width: 18, height: 14, borderRadius: 2, opacity: 0.5 },
+  catalogCardNumber: { fontSize: fontSize.md, fontWeight: fontWeight.medium, letterSpacing: 3 },
+  catalogVisualBottom: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-end' },
+  catalogVisualName: { fontSize: fontSize.md, fontWeight: fontWeight.bold, letterSpacing: 0.5 },
+  catalogVisualBrand: { fontSize: fontSize.sm, fontWeight: fontWeight.bold, letterSpacing: 0.5 },
+  catalogStripe: { position: 'absolute' as const, bottom: 0, left: 0, right: 0, height: 3 },
+  virtualTag: { flexDirection: 'row', alignItems: 'center', gap: 3, backgroundColor: 'rgba(0,0,0,0.3)', borderRadius: radius.full, paddingHorizontal: spacing.sm, paddingVertical: 3 },
   virtualTagText: { fontSize: 9, fontWeight: fontWeight.bold, color: '#FFF' },
   catalogInfo: { padding: spacing.xl, gap: spacing.lg },
   catalogName: { fontSize: fontSize.lg, fontWeight: fontWeight.bold, color: colors.textPrimary },
@@ -817,14 +853,15 @@ const s = StyleSheet.create({
   metaItem: { alignItems: 'center', gap: 2 },
   metaLabel: { fontSize: fontSize['2xs'], color: colors.textMuted, textTransform: 'uppercase', letterSpacing: 0.3 },
   metaValue: { fontSize: fontSize.sm, fontWeight: fontWeight.bold, color: colors.textPrimary },
-  benefitsBtn: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: spacing.xs },
+  benefitsBtn: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: spacing.xs, paddingVertical: spacing.sm },
   benefitsBtnText: { fontSize: fontSize.sm, fontWeight: fontWeight.semibold, color: colors.itauOrange },
-  benefitsList: { gap: spacing.sm },
+  benefitsList: { gap: spacing.sm, backgroundColor: colors.bgInput, borderRadius: radius.md, padding: spacing.md },
   benefitItem: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm },
-  benefitText: { fontSize: fontSize.sm, color: colors.textPrimary },
+  benefitCheck: { width: 20, height: 20, borderRadius: 10, backgroundColor: colors.success, alignItems: 'center', justifyContent: 'center' },
+  benefitText: { fontSize: fontSize.sm, color: colors.textPrimary, flex: 1 },
   disabledMsg: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: spacing.sm, paddingVertical: spacing.md },
   disabledMsgText: { fontSize: fontSize.sm, color: colors.error },
-  contractBtn: { backgroundColor: colors.itauOrange, borderRadius: radius.lg, paddingVertical: spacing.lg, alignItems: 'center' },
+  contractBtn: { backgroundColor: colors.itauOrange, borderRadius: radius.lg, paddingVertical: spacing.lg, alignItems: 'center', flexDirection: 'row', justifyContent: 'center', gap: spacing.sm },
   contractBtnText: { fontSize: fontSize.md, fontWeight: fontWeight.bold, color: '#FFF' },
 
   // Detail sheet

@@ -17,7 +17,7 @@ import { useCustomerStore, useOnboardingChatStore, useChatStore } from '@/stores
 import { authService } from '@/services/auth.service'
 import { ChatBubble, ChatInput, TypingIndicator } from '@/components/chat'
 import { getOnboardingProgress } from '@/types'
-import { resetDeviceId } from '@/lib'
+import { resetTempSessionId } from '@/lib'
 import type {
   AuthStep, LoginRequest, RegisterStep1Data,
   RegisterStep2Data, RegisterStep3Data,
@@ -315,9 +315,8 @@ export default function AuthScreen() {
         })
         setCustomerId(response.customerId)
         saveCpf(loginForm.cpf) // Remember CPF for next login
-        // Reset chat & device ID so logged-in session starts fresh
+        // Clear chat — no need to reset temp ID, login uses real customerId
         useChatStore.getState().clearChat()
-        await resetDeviceId()
 
         setAuthenticated({
           accessToken: response.accessToken,
@@ -931,15 +930,15 @@ export default function AuthScreen() {
   // Reset chat state every time user enters the AI chat screen
   useEffect(() => {
     if (currentStep === 'open-ai-chat') {
+      resetTempSessionId()  // new temp ID FIRST so the next chat call uses it
       aiClearChat()
-      resetDeviceId()   // new device ID → backend sees a fresh session
     }
   }, [currentStep])
 
   // DevTool: reset onboarding chat
   const handleResetDevSession = useCallback(() => {
+    resetTempSessionId()  // new temp ID → backend sees a fresh session
     aiClearChat()
-    resetDeviceId()   // new device ID → backend discards old attempts
   }, [aiClearChat])
 
   const aiProgress = getOnboardingProgress(aiStep)
@@ -996,8 +995,8 @@ export default function AuthScreen() {
         <TouchableOpacity
           onPress={() => {
             haptic()
+            resetTempSessionId()
             aiClearChat()
-            resetDeviceId()
             animateTransition('welcome')
           }}
           style={aiStyles.headerBackBtn}
@@ -1112,8 +1111,8 @@ export default function AuthScreen() {
                 style={aiSuccessStyles.ctaButton}
                 onPress={() => {
                   haptic()
+                  resetTempSessionId()
                   aiClearChat()
-                  resetDeviceId()
                   animateTransition('login')
                 }}
                 activeOpacity={0.7}

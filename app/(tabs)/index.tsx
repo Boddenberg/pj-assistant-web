@@ -8,7 +8,7 @@ import { Ionicons } from '@expo/vector-icons'
 import { LinearGradient } from 'expo-linear-gradient'
 import * as Haptics from 'expo-haptics'
 import { colors, spacing, radius, fontSize, fontWeight, shadow } from '@/theme'
-import { formatCurrency, resetDeviceId } from '@/lib'
+import { formatCurrency, resetTempSessionId } from '@/lib'
 import { useCustomerStore, useAuthStore, useChatStore } from '@/stores'
 import { useTransactionSummary, useFinancialSummary, useAccount, transactionKeys, financialKeys, accountKeys } from '@/hooks'
 import { useQueryClient } from '@tanstack/react-query'
@@ -41,7 +41,7 @@ export default function HomeScreen() {
   const handleLogout = useCallback(() => {
     const doLogout = () => {
       useChatStore.getState().clearChat()
-      resetDeviceId()  // new anonymous identity
+      resetTempSessionId()  // new temp ID for next anonymous session
       clearCustomer()
       logout()
     }

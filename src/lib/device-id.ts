@@ -1,10 +1,17 @@
-// ─── Device ID ───────────────────────────────────────────────────────
-// Generates a stable UUID per installation, persisted in AsyncStorage.
-// Used to uniquely identify anonymous users across sessions.
-
-import AsyncStorage from '@react-native-async-storage/async-storage'
-
-const STORAGE_KEY = '@pj_assistant_device_id'
+// ─── Temp Session ID ─────────────────────────────────────────────────
+// Generates a temporary UUID for anonymous/onboarding sessions.
+// This ID is used as customer_id in the BFA URL so the backend can
+// track the onboarding conversation per session.
+//
+// Lifecycle:
+//   - Generated eagerly on module load (app start)
+//   - Used ONLY during onboarding chat (account opening)
+//   - Reset when user clicks the reset button → new UUID → fresh session
+//   - Abandoned when user logs in (real customerId takes over)
+//   - Regenerated when user logs out
+//
+// ⚠️  Purely in-memory — NOT persisted to AsyncStorage.
+//     Every app cold-start gets a fresh ID automatically.
 
 /** UUID v4 generator (no external dependency) */
 function generateUUID(): string {
@@ -15,58 +22,39 @@ function generateUUID(): string {
   })
 }
 
-/** In-memory cache so we don't hit AsyncStorage on every request */
-let cachedDeviceId: string | null = null
+/** In-memory only — generated eagerly, never persisted */
+let currentTempId: string = generateUUID()
 
 /**
- * Returns a stable device identifier.
- * - First call: reads from AsyncStorage (or generates + persists a new one)
- * - Subsequent calls: returns from memory cache instantly
+ * Returns the current temporary session ID (synchronous).
+ * Always available — generated on module load.
  */
+export function getTempSessionId(): string {
+  return currentTempId
+}
+
+/**
+ * Generates a brand-new temporary session ID and returns it.
+ * Call on: reset button, logout, entering onboarding screen.
+ */
+export function resetTempSessionId(): string {
+  currentTempId = generateUUID()
+  return currentTempId
+}
+
+// ── Legacy exports (keep signatures so other files compile) ──────────
+
+/** @deprecated Use getTempSessionId() — kept for http-client header */
 export async function getDeviceId(): Promise<string> {
-  if (cachedDeviceId) return cachedDeviceId
-
-  try {
-    const stored = await AsyncStorage.getItem(STORAGE_KEY)
-    if (stored) {
-      cachedDeviceId = stored
-      return stored
-    }
-  } catch {
-    // AsyncStorage read failed — generate a new one
-  }
-
-  const newId = generateUUID()
-  cachedDeviceId = newId
-
-  try {
-    await AsyncStorage.setItem(STORAGE_KEY, newId)
-  } catch {
-    // Persistence failed — ID still works for this session
-    console.warn('[device-id] Failed to persist device ID')
-  }
-
-  return newId
+  return currentTempId
 }
 
-/** Clears the cached device ID (useful for tests) */
+/** @deprecated Use resetTempSessionId() */
 export function resetDeviceIdCache(): void {
-  cachedDeviceId = null
+  resetTempSessionId()
 }
 
-/**
- * Fully resets the device ID: generates a brand-new UUID, caches it
- * in memory and persists to AsyncStorage **atomically**.
- * Any subsequent call to getDeviceId() returns the new ID immediately
- * — no window where the old value could be read back from storage.
- */
+/** @deprecated Use resetTempSessionId() */
 export async function resetDeviceId(): Promise<string> {
-  const newId = generateUUID()
-  cachedDeviceId = newId            // instant — no race
-  try {
-    await AsyncStorage.setItem(STORAGE_KEY, newId)
-  } catch {
-    // persistence is best-effort; in-memory value is authoritative
-  }
-  return newId
+  return resetTempSessionId()
 }
