@@ -4,6 +4,7 @@ import { assistantService } from '@/services'
 import { generateId, sanitizeInput, AppError, ErrorCode } from '@/lib'
 
 const MAX_HISTORY = 5
+const MIN_RESPONSE_MS = 600
 
 interface OnboardingChatState {
   messages: ChatMessage[]
@@ -52,6 +53,7 @@ export const useOnboardingChatStore = create<OnboardingChatState>(
 
       try {
         const { history, conversationId } = get()
+        const t0 = Date.now()
 
         const response = await assistantService.chat(
           sanitized,
@@ -59,6 +61,12 @@ export const useOnboardingChatStore = create<OnboardingChatState>(
           history.length > 0 ? history : undefined,
           false, // onboarding is always unauthenticated
         )
+
+        // Ensure a minimum response time so fast replies feel natural
+        const elapsed = Date.now() - t0
+        if (elapsed < MIN_RESPONSE_MS) {
+          await new Promise((r) => setTimeout(r, MIN_RESPONSE_MS - elapsed))
+        }
 
         const assistantMessage: ChatMessage = {
           id: generateId(),

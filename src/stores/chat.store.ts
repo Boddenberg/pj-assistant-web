@@ -4,6 +4,8 @@ import { assistantService } from '@/services'
 import { useAuthStore } from '@/stores/auth.store'
 import { generateId, sanitizeInput, AppError, ErrorCode } from '@/lib'
 
+const MIN_RESPONSE_MS = 600
+
 interface ChatState {
   messages: ChatMessage[]
   conversationId: string | null
@@ -39,12 +41,20 @@ export const useChatStore = create<ChatState>((set, get) => ({
     }))
 
     try {
+      const t0 = Date.now()
+
       const response = await assistantService.chat(
         sanitized,
         get().conversationId ?? undefined,
         undefined,
         useAuthStore.getState().isAuthenticated,
       )
+
+      // Ensure a minimum response time so fast replies feel natural
+      const elapsed = Date.now() - t0
+      if (elapsed < MIN_RESPONSE_MS) {
+        await new Promise((r) => setTimeout(r, MIN_RESPONSE_MS - elapsed))
+      }
 
       const assistantMessage: ChatMessage = {
         id: generateId(),
